@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hakiapi"
+version = "0.1.0"
+description = "A resilient, auto-paginating Python API client framework."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+
+authors = [
+    {name="Aakash"}
+]
+
+keywords = ["api-client", "retry", "pagination", "rest-api", "http"]
+
+dependencies = [
+    "requests>=2.32.0",
+    "urllib3>=1.26.0"
+]
+
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Developers",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/Gugilla-Aakash/hakiapi"
+"Source Code" = "https://github.com/Gugilla-Aakash/hakiapi"
+"Bug Tracker" = "https://github.com/Gugilla-Aakash/hakiapi/issues"
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "responses",
+    "ruff",
+]
+
+[tool.setuptools.packages.find]
+include = ["hakiapi", "hakiapi.*"]
