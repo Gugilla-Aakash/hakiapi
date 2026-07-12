@@ -1,0 +1,15 @@
+# Python virtual environments
+.venv/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Build artifacts
+*.egg-info/
+
+# Test cache
+.pytest_cache/
+
+# Ruff
+.ruff_cache/
