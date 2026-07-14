@@ -24,8 +24,8 @@ HakiAPI aims to make building Python SDKs simple, consistent, and developer-frie
 
 - ✅ Custom exception hierarchy
 - ✅ Configurable retry adapter
-- 🚧 Authentication (in progress)
-- 🚧 Base API client
+- ✅ Authentication
+- 🚧 Base API client (in progress)
 - 🚧 Pagination
 - 🚧 Built-in API clients
 
