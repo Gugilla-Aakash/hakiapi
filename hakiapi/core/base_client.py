@@ -33,7 +33,6 @@ class BaseAPIClient:
         self.session.mount("https://", adapter)
 
     def close(self) -> None:
-        """Safely close the underlying requests session and free connections."""
         self.session.close()
 
     def __enter__(self) -> "BaseAPIClient":

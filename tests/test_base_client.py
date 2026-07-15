@@ -10,7 +10,6 @@ import pytest
 import requests
 from requests.adapters import HTTPAdapter
 
-# FIXED: Corrected the linkage paths to point to the `core` module
 from hakiapi.core import base_client
 from hakiapi.core.base_client import BaseAPIClient
 from hakiapi.core.exceptions import (
@@ -29,7 +28,7 @@ def make_response(
     text_data: str | None = None,
     headers: dict[str, str] | None = None,
 ) -> requests.Response:
-    """Helper to generate a mock HTTP response."""
+    """Helper to generate a mock HTTP response, Response catches the request and send custom payload."""
     response = requests.models.Response()
     response.status_code = status_code
     response.headers.update(headers or {})
@@ -92,7 +91,7 @@ class TestInit:
 
 class TestContextManagerAndClose:
     def test_close_closes_session(self, client: BaseAPIClient) -> None:
-        client.session.close = MagicMock()  # type: ignore
+        client.session.close = MagicMock()
         client.close()
         client.session.close.assert_called_once()
 
@@ -116,7 +115,7 @@ class TestContextManagerAndClose:
 
 class TestUrlConstruction:
     def test_joins_base_url_and_endpoint(self, client: BaseAPIClient) -> None:
-        client.session.request = MagicMock(return_value=make_response(json_data={}))  # type: ignore
+        client.session.request = MagicMock(return_value=make_response(json_data={}))
         client.get("users")
         assert (
             client.session.request.call_args.kwargs["url"]
@@ -124,7 +123,7 @@ class TestUrlConstruction:
         )
 
     def test_strips_leading_slash_from_endpoint(self, client: BaseAPIClient) -> None:
-        client.session.request = MagicMock(return_value=make_response(json_data={}))  # type: ignore
+        client.session.request = MagicMock(return_value=make_response(json_data={}))
         client.get("/users")
         assert (
             client.session.request.call_args.kwargs["url"]
@@ -132,7 +131,7 @@ class TestUrlConstruction:
         )
 
     def test_nested_endpoint_path(self, client: BaseAPIClient) -> None:
-        client.session.request = MagicMock(return_value=make_response(json_data={}))  # type: ignore
+        client.session.request = MagicMock(return_value=make_response(json_data={}))
         client.get("/users/123/posts")
         assert (
             client.session.request.call_args.kwargs["url"]
@@ -144,19 +143,19 @@ class TestTimeoutHandling:
     def test_uses_default_timeout_when_not_overridden(
         self, client: BaseAPIClient
     ) -> None:
-        client.session.request = MagicMock(return_value=make_response(json_data={}))  # type: ignore
+        client.session.request = MagicMock(return_value=make_response(json_data={}))
         client.get("users")
         assert client.session.request.call_args.kwargs["timeout"] == 10.0
 
     def test_per_request_timeout_overrides_default(self, client: BaseAPIClient) -> None:
-        client.session.request = MagicMock(return_value=make_response(json_data={}))  # type: ignore
+        client.session.request = MagicMock(return_value=make_response(json_data={}))
         client.get("users", timeout=2.5)
         assert client.session.request.call_args.kwargs["timeout"] == 2.5
 
     def test_timeout_not_leaked_into_request_kwargs_twice(
         self, client: BaseAPIClient
     ) -> None:
-        client.session.request = MagicMock(return_value=make_response(json_data={}))  # type: ignore
+        client.session.request = MagicMock(return_value=make_response(json_data={}))
         client.get("users", timeout=2.5)
         assert (
             list(client.session.request.call_args.kwargs.keys()).count("timeout") == 1
@@ -165,7 +164,7 @@ class TestTimeoutHandling:
 
 class TestTransportErrors:
     def test_timeout_raises_request_timeout_error(self, client: BaseAPIClient) -> None:
-        client.session.request = MagicMock(side_effect=requests.exceptions.Timeout())  # type: ignore
+        client.session.request = MagicMock(side_effect=requests.exceptions.Timeout())
         with pytest.raises(RequestTimeoutError) as exc_info:
             client.get("users")
         assert exc_info.value.timeout_duration == 10.0
@@ -175,7 +174,7 @@ class TestTransportErrors:
     def test_timeout_error_uses_overridden_timeout_value(
         self, client: BaseAPIClient
     ) -> None:
-        client.session.request = MagicMock(side_effect=requests.exceptions.Timeout())  # type: ignore
+        client.session.request = MagicMock(side_effect=requests.exceptions.Timeout())
         with pytest.raises(RequestTimeoutError) as exc_info:
             client.get("users", timeout=3.0)
         assert exc_info.value.timeout_duration == 3.0
@@ -185,7 +184,7 @@ class TestTransportErrors:
     ) -> None:
         client.session.request = MagicMock(
             side_effect=requests.exceptions.ConnectionError("network down")
-        )  # type: ignore
+        )
         with pytest.raises(HakiAPIError) as exc_info:
             client.get("users")
         assert not isinstance(exc_info.value, RequestTimeoutError)
@@ -193,17 +192,18 @@ class TestTransportErrors:
     def test_haki_api_error_message_preserved(self, client: BaseAPIClient) -> None:
         client.session.request = MagicMock(
             side_effect=requests.exceptions.ConnectionError("network down")
-        )  # type: ignore
+        )
         with pytest.raises(HakiAPIError) as exc_info:
             client.get("users")
         assert "network down" in exc_info.value.message
 
 
 class TestStatusCodeMapping:
+    # Let's ignore type
     def test_429_raises_rate_limit_error(self, client: BaseAPIClient) -> None:
         client.session.request = MagicMock(
             return_value=make_response(status_code=429, headers={"Retry-After": "30"})
-        )  # type: ignore
+        )
         with pytest.raises(RateLimitError) as exc_info:
             client.get("users")
         assert exc_info.value.status_code == 429
@@ -211,7 +211,7 @@ class TestStatusCodeMapping:
         assert isinstance(exc_info.value, ClientError)
 
     def test_429_without_retry_after_header(self, client: BaseAPIClient) -> None:
-        client.session.request = MagicMock(return_value=make_response(status_code=429))  # type: ignore
+        client.session.request = MagicMock(return_value=make_response(status_code=429))
         with pytest.raises(RateLimitError) as exc_info:
             client.get("users")
         assert exc_info.value.retry_after is None
@@ -224,20 +224,20 @@ class TestStatusCodeMapping:
                 status_code=429,
                 headers={"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"},
             )
-        )  # type: ignore
+        )
         with pytest.raises(RateLimitError) as exc_info:
             client.get("users")
         assert exc_info.value.retry_after is None
 
     def test_401_raises_authentication_error(self, client: BaseAPIClient) -> None:
-        client.session.request = MagicMock(return_value=make_response(status_code=401))  # type: ignore
+        client.session.request = MagicMock(return_value=make_response(status_code=401))
         with pytest.raises(AuthenticationError) as exc_info:
             client.get("users")
         assert exc_info.value.status_code == 401
         assert isinstance(exc_info.value, ClientError)
 
     def test_403_raises_authentication_error(self, client: BaseAPIClient) -> None:
-        client.session.request = MagicMock(return_value=make_response(status_code=403))  # type: ignore
+        client.session.request = MagicMock(return_value=make_response(status_code=403))
         with pytest.raises(AuthenticationError) as exc_info:
             client.get("users")
         assert exc_info.value.status_code == 403
@@ -248,7 +248,7 @@ class TestStatusCodeMapping:
     ) -> None:
         client.session.request = MagicMock(
             return_value=make_response(status_code=status_code)
-        )  # type: ignore
+        )
         with pytest.raises(ClientError) as exc_info:
             client.get("users")
         assert exc_info.value.status_code == status_code
@@ -260,7 +260,7 @@ class TestStatusCodeMapping:
     ) -> None:
         client.session.request = MagicMock(
             return_value=make_response(status_code=status_code)
-        )  # type: ignore
+        )
         with pytest.raises(ServerError) as exc_info:
             client.get("users")
         assert exc_info.value.status_code == status_code
@@ -269,14 +269,14 @@ class TestStatusCodeMapping:
     def test_429_takes_precedence_over_generic_client_error(
         self, client: BaseAPIClient
     ) -> None:
-        client.session.request = MagicMock(return_value=make_response(status_code=429))  # type: ignore
+        client.session.request = MagicMock(return_value=make_response(status_code=429))
         with pytest.raises(RateLimitError):
             client.get("users")
 
     def test_401_takes_precedence_over_generic_client_error(
         self, client: BaseAPIClient
     ) -> None:
-        client.session.request = MagicMock(return_value=make_response(status_code=401))  # type: ignore
+        client.session.request = MagicMock(return_value=make_response(status_code=401))
         with pytest.raises(AuthenticationError):
             client.get("users")
 
@@ -284,37 +284,38 @@ class TestStatusCodeMapping:
         self, client: BaseAPIClient
     ) -> None:
         response = make_response(status_code=500)
-        client.session.request = MagicMock(return_value=response)  # type: ignore
+        client.session.request = MagicMock(return_value=response)
         with pytest.raises(ServerError) as exc_info:
             client.get("users")
         assert exc_info.value.response is response
 
     def test_error_str_includes_status_code(self, client: BaseAPIClient) -> None:
-        client.session.request = MagicMock(return_value=make_response(status_code=404))  # type: ignore
+        client.session.request = MagicMock(return_value=make_response(status_code=404))
         with pytest.raises(ClientError) as exc_info:
             client.get("users")
         assert "404" in str(exc_info.value)
 
 
 class TestSuccessResponses:
+    # We ignore type
     def test_returns_parsed_json_on_success(self, client: BaseAPIClient) -> None:
         client.session.request = MagicMock(
             return_value=make_response(
                 status_code=200, json_data={"id": 1, "name": "haki"}
             )
-        )  # type: ignore
+        )
         result = client.get("users/1")
         assert result == {"id": 1, "name": "haki"}
 
     def test_returns_text_when_body_is_not_json(self, client: BaseAPIClient) -> None:
         client.session.request = MagicMock(
             return_value=make_response(status_code=200, text_data="plain text response")
-        )  # type: ignore
+        )
         result = client.get("users/1")
         assert result == "plain text response"
 
     def test_returns_empty_text_for_empty_body(self, client: BaseAPIClient) -> None:
-        client.session.request = MagicMock(return_value=make_response(status_code=204))  # type: ignore
+        client.session.request = MagicMock(return_value=make_response(status_code=204))
         result = client.delete("users/1")
         assert result == ""
 
@@ -322,13 +323,13 @@ class TestSuccessResponses:
         self, client: BaseAPIClient
     ) -> None:
         response = make_response(status_code=200, json_data={"ok": True})
-        client.session.request = MagicMock(return_value=response)  # type: ignore
+        client.session.request = MagicMock(return_value=response)
         result = client.get("users/1", raw_response=True)
         assert result is response
 
     def test_raw_response_bypasses_json_parsing(self, client: BaseAPIClient) -> None:
         response = make_response(status_code=200, text_data="not json {{{")
-        client.session.request = MagicMock(return_value=response)  # type: ignore
+        client.session.request = MagicMock(return_value=response)
         result = client.get("users/1", raw_response=True)
         assert result is response
 
@@ -344,6 +345,7 @@ class TestSuccessResponses:
 
 
 class TestHttpVerbMethods:
+    # type: error
     @pytest.mark.parametrize(
         "verb, expected_method",
         [
@@ -357,32 +359,32 @@ class TestHttpVerbMethods:
     def test_verb_method_sends_correct_http_method(
         self, client: BaseAPIClient, verb: str, expected_method: str
     ) -> None:
-        client.session.request = MagicMock(return_value=make_response(json_data={}))  # type: ignore
+        client.session.request = MagicMock(return_value=make_response(json_data={}))
         getattr(client, verb)("users")
         assert client.session.request.call_args.kwargs["method"] == expected_method
 
     def test_post_forwards_json_kwarg(self, client: BaseAPIClient) -> None:
-        client.session.request = MagicMock(return_value=make_response(json_data={}))  # type: ignore
+        client.session.request = MagicMock(return_value=make_response(json_data={}))
         client.post("users", json={"name": "haki"})
         assert client.session.request.call_args.kwargs["json"] == {"name": "haki"}
 
     def test_get_forwards_params_kwarg(self, client: BaseAPIClient) -> None:
-        client.session.request = MagicMock(return_value=make_response(json_data={}))  # type: ignore
+        client.session.request = MagicMock(return_value=make_response(json_data={}))
         client.get("users", params={"page": 2})
         assert client.session.request.call_args.kwargs["params"] == {"page": 2}
 
     def test_put_forwards_data_kwarg(self, client: BaseAPIClient) -> None:
-        client.session.request = MagicMock(return_value=make_response(json_data={}))  # type: ignore
+        client.session.request = MagicMock(return_value=make_response(json_data={}))
         client.put("users/1", data={"name": "updated"})
         assert client.session.request.call_args.kwargs["data"] == {"name": "updated"}
 
     def test_patch_forwards_headers_kwarg(self, client: BaseAPIClient) -> None:
-        client.session.request = MagicMock(return_value=make_response(json_data={}))  # type: ignore
+        client.session.request = MagicMock(return_value=make_response(json_data={}))
         client.patch("users/1", headers={"X-Custom": "1"})
         assert client.session.request.call_args.kwargs["headers"] == {"X-Custom": "1"}
 
     def test_delete_with_no_body(self, client: BaseAPIClient) -> None:
-        client.session.request = MagicMock(return_value=make_response(status_code=204))  # type: ignore
+        client.session.request = MagicMock(return_value=make_response(status_code=204))
         client.delete("users/1")
         assert client.session.request.call_args.kwargs["method"] == "DELETE"
 
