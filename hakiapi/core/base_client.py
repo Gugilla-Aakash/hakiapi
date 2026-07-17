@@ -1,5 +1,5 @@
 import requests
-from typing import Any
+from typing import Any, TypeVar
 from requests.auth import AuthBase
 
 from .retry import create_retry_adapter
@@ -11,6 +11,8 @@ from .exceptions import (
     AuthenticationError,
     RequestTimeoutError,
 )
+
+T = TypeVar("T", bound="BaseAPIClient")
 
 
 class BaseAPIClient:
@@ -35,7 +37,7 @@ class BaseAPIClient:
     def close(self) -> None:
         self.session.close()
 
-    def __enter__(self) -> "BaseAPIClient":
+    def __enter__(self: T) -> T:
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
