@@ -85,14 +85,14 @@ Just Python.
 | 📄 **Automatic pagination** | Auto-detects GitHub-style Link headers *and* cursor/token APIs, iterated lazily |
 | ⚠️ **Rich exception hierarchy** | `RateLimitError`, `ServerError`, and more — catch exactly what you expect |
 | 🧱 **Extensible `BaseAPIClient`** | Subclass it once, inherit auth/retry/pagination for free |
-| 📦 **Ready-to-use service clients** | GitHub included out of the box |
+| 📦 **Ready-to-use service clients** | GitHub, Gmail included out of the box |
 
 ---
 
 ## Architecture
 
 ```
-                GitHubClient
+            GitHubClient,GmailClient
                        │
                        ▼
                 BaseAPIClient
@@ -118,6 +118,7 @@ hakiapi/
 │
 └── clients/
     ├── github.py
+    ├── gmail.py
 ```
 
 ---
@@ -128,8 +129,8 @@ hakiapi/
 pytest
 ```
 
-- ✔ 190+ tests
-- ✔ Full client coverage (GitHub, Stripe, Twitter)
+- ✔ 210+ tests
+- ✔ Full client coverage (GitHub, Gmail)
 - ✔ Full core framework coverage (auth, retry, paginator, base client)
 
 ---
@@ -141,6 +142,7 @@ pytest
 - [x] Authentication system
 - [x] Automatic pagination
 - [x] GitHub client
+- [x] Gmail client
 - [ ] Stripe client
 - [ ] Twitter client
 - [ ] Async client
