@@ -2,6 +2,7 @@
 
 from .core.base_client import BaseAPIClient
 from .clients.github import GitHubClient
+from .clients.gmail import GmailClient
 
 from .core import exceptions
 from .core import auth
@@ -11,6 +12,7 @@ from .core import paginator
 __all__ = [
     "BaseAPIClient",
     "GitHubClient",
+    "GmailClient",
     "exceptions",
     "auth",
     "retry",
