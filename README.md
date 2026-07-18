@@ -85,7 +85,7 @@ Just Python.
 | 📄 **Automatic pagination** | Auto-detects GitHub-style Link headers *and* cursor/token APIs, iterated lazily |
 | ⚠️ **Rich exception hierarchy** | `RateLimitError`, `ServerError`, and more — catch exactly what you expect |
 | 🧱 **Extensible `BaseAPIClient`** | Subclass it once, inherit auth/retry/pagination for free |
-| 📦 **Ready-to-use service clients** | GitHub, Stripe, and Twitter included out of the box |
+| 📦 **Ready-to-use service clients** | GitHub included out of the box |
 
 ---
 
@@ -93,8 +93,6 @@ Just Python.
 
 ```
                 GitHubClient
-                TwitterClient
-                StripeClient
                        │
                        ▼
                 BaseAPIClient
@@ -120,8 +118,6 @@ hakiapi/
 │
 └── clients/
     ├── github.py
-    ├── stripe.py
-    └── twitter.py
 ```
 
 ---
