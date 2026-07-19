@@ -1,14 +1,12 @@
 """
-Example usage of the HakiAPI Gmail Client.
+Example usage of the HakiAPI Gmail Client with Resource-Based Routing.
 """
 
 import os
 import sys
-
-# Import the client directly from the top-level facade
 from hakiapi import GmailClient, exceptions
 
-# Fetch the token from the OS environment securely
+# 1. Fetch the token from the OS environment securely
 token = os.environ.get("GMAIL_OAUTH_TOKEN")
 
 if not token:
@@ -16,23 +14,41 @@ if not token:
     print("Please run: export GMAIL_OAUTH_TOKEN='your_token_here'")
     sys.exit(1)
 
-# Initialize the client
-client = GmailClient(token=token)
-
+# 2. Initialize the client securely using the context manager
 try:
-    # Fetch the user's profile
-    print("Authenticating with Google...")
-    profile = client.get_profile()
-    print(f"Success! Connected as: {profile.get('emailAddress')}")
+    with GmailClient(token=token) as gmail:
+        print("Authenticating with Google...\n")
 
-    # Fetch the 3 most recent messages using your memory-safe generator
-    print("\nFetching recent messages...")
-    messages = client.get_all_messages()
+        # 3. Profile Resource
+        profile = gmail.profile.get()
+        print(f"✅ Connected as: {profile.get('emailAddress')}")
 
-    for count, msg in enumerate(messages):
-        if count >= 3:
-            break
-        print(f"- Found Message ID: {msg.get('id')}")
+        # 4. Labels Resource
+        print("\nFetching Mailbox Labels...")
+        labels_response = gmail.labels.list()
+        labels = labels_response.get("labels", [])
+        print(f"Found {len(labels)} labels. Top 3:")
+        for label in labels[:3]:
+            print(f"  - {label.get('name')}")
+
+        # 5. Messages Resource - Search & Pagination
+        print("\nSearching for the 3 most recent unread messages...")
+        # Using the new nested search and max_pages safety valve
+        unread_messages = gmail.messages.search(query="is:unread", max_pages=1)
+
+        for count, msg_stub in enumerate(unread_messages):
+            if count >= 3:
+                break
+
+            msg_id = msg_stub.get("id")
+            if not isinstance(msg_id, str):
+                continue
+            print(f"\n📥 Message ID: {msg_id}")
+
+            # 6. Messages Resource - Get specific message payload
+            full_msg = gmail.messages.get(message_id=msg_id)
+            snippet = full_msg.get("snippet", "No snippet available.")
+            print(f"   Snippet: {snippet[:75]}...")
 
 except exceptions.HakiAPIError as e:
-    print(f"API Request failed: {e}")
+    print(f"\n❌ API Request failed: {e}")
