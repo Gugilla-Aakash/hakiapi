@@ -11,6 +11,7 @@ Authentication · Retries · Pagination · Typed Exceptions · Session Managemen
 [![License](https://img.shields.io/github/license/Gugilla-Aakash/hakiapi?style=for-the-badge)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-214_passing-success?style=for-the-badge)](#testing)
 [![Typing](https://img.shields.io/badge/typing-fully_typed-blue?style=for-the-badge)](#features)
+[![Downloads](https://img.shields.io/pypi/dm/hakiapi?style=for-the-badge)](https://pypistats.org/packages/hakiapi)
 
 **Stop rewriting authentication, retries, and pagination for every API client you build.**
 
