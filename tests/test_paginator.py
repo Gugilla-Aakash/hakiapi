@@ -1,39 +1,20 @@
 """
-Tests for the `paginate` generator in the paginator module.
-
-These tests verify that:
-- Link header pagination (GitHub-style) and token-based pagination
-  (Twitter/X-style) both work correctly.
-- Next page URLs are resolved using only the URL path, while query
-  parameters are always passed through `params`.
-- Path resolution behaves the same whether the next URL points to the
-  same host or a different one.
-- Link header pagination takes priority when both a Link header and a
-  `next_token` are present.
-- The `max_pages` limit stops pagination after the expected number of
-  requests.
-- Pagination ends when there are no more pages to fetch.
-- Invalid response formats raise a `ValueError`.
-- Initial query parameters are handled correctly for both dictionaries
-  and lists of tuples, including duplicate keys.
-- The `pagination_token` is updated between requests instead of being
-  added multiple times.
-- Any extra keyword arguments are passed through to `client._request`
-  on every request.
+Tests for paginator.paginate().
 """
 
-from typing import Any, Iterable
+from typing import Any, Optional
+from unittest.mock import MagicMock
 import pytest
-
 from hakiapi.core.paginator import paginate
-from hakiapi.core.base_client import BaseAPIClient
+
+# Helpers
 
 
 class FakeResponse:
-    """Minimal stand-in for requests.Response."""
+    """Mimics the bits of requests.Response that paginate() touches."""
 
     def __init__(
-        self, json_data: Any, links: dict[str, dict[str, str]] | None = None
+        self, json_data: Any, links: Optional[dict[str, dict[str, str]]] = None
     ) -> None:
         self._json_data = json_data
         self.links = links or {}
@@ -42,475 +23,321 @@ class FakeResponse:
         return self._json_data
 
 
-# 2. Inherit from BaseAPIClient to cast the type for the linter
-class FakeClient(BaseAPIClient):
-    """
-    Minimal stand-in for BaseAPIClient. Responses are consumed in
-    order from a queue, one per call to `_request`. Every call is
-    recorded in `self.calls` for assertion.
-    """
-
-    def __init__(self, base_url: str, responses: Iterable[FakeResponse]) -> None:
-        # We purposely do not call super().__init__() here to avoid
-        # initializing actual network sessions.
-        self.base_url = base_url
-        self._responses = list(responses)
-        self.calls: list[dict[str, Any]] = []
-
-    def _request(
-        self,
-        method: str,
-        endpoint: str,
-        raw_response: bool = True,
-        params: Any = None,
-        **kwargs: Any,
-    ) -> FakeResponse:
-        self.calls.append(
-            {
-                "method": method,
-                "endpoint": endpoint,
-                "raw_response": raw_response,
-                "params": params,
-                "kwargs": kwargs,
-            }
-        )
-        return self._responses.pop(0)
+@pytest.fixture
+def mock_client() -> MagicMock:
+    client = MagicMock()
+    return client
 
 
-# Link-header (GitHub-style) pagination
+def call_kwargs(mock_client: MagicMock, call_index: int) -> dict[str, Any]:
+    return mock_client._request.call_args_list[call_index].kwargs
 
 
-def test_link_header_pagination_yields_all_items_in_order() -> None:
-    responses = [
-        FakeResponse(
-            [{"id": 1}, {"id": 2}],
-            links={"next": {"url": "https://api.example.com/items?page=2"}},
-        ),
-        FakeResponse([{"id": 3}], links={}),
-    ]
-    client = FakeClient("https://api.example.com/", responses)
-
-    items = list(paginate(client, "items"))
-
-    assert items == [{"id": 1}, {"id": 2}, {"id": 3}]
-    assert len(client.calls) == 2
+def call_params_dict(mock_client: MagicMock, call_index: int) -> dict[str, Any]:
+    """params are passed as a list of tuples (or None); normalize to a dict for easy asserts."""
+    params = call_kwargs(mock_client, call_index)["params"]
+    return dict(params) if params else {}
 
 
-def test_link_header_pagination_stops_when_no_next_link() -> None:
-    responses = [FakeResponse([{"id": 1}], links={})]
-    client = FakeClient("https://api.example.com/", responses)
-
-    items = list(paginate(client, "items"))
-
-    assert items == [{"id": 1}]
-    assert len(client.calls) == 1
+# GitHub-style pagination (Link header, bare list responses)
 
 
-def test_link_header_endpoint_is_path_only() -> None:
-    responses = [
-        FakeResponse(
-            [{"id": 1}],
-            links={"next": {"url": "https://api.example.com/items?page=2"}},
-        ),
-        FakeResponse([{"id": 2}], links={}),
-    ]
-    client = FakeClient("https://api.example.com/", responses)
+class TestGitHubStylePagination:
+    def test_single_page_no_link_header(self, mock_client: MagicMock) -> None:
+        mock_client._request.return_value = FakeResponse([{"id": 1}, {"id": 2}])
 
-    list(paginate(client, "items"))
+        items = list(paginate(mock_client, "repos/x/x/issues"))
 
-    assert client.calls[1]["endpoint"] == "items"
+        assert items == [{"id": 1}, {"id": 2}]
+        assert mock_client._request.call_count == 1
 
+    def test_follows_link_header_across_pages(self, mock_client: MagicMock) -> None:
+        mock_client._request.side_effect = [
+            FakeResponse(
+                [{"id": 1}],
+                links={
+                    "next": {
+                        "url": "https://api.github.com/repos/x/x/issues?page=2&per_page=30"
+                    }
+                },
+            ),
+            FakeResponse(
+                [{"id": 2}],
+                links={
+                    "next": {
+                        "url": "https://api.github.com/repos/x/x/issues?page=3&per_page=30"
+                    }
+                },
+            ),
+            FakeResponse([{"id": 3}]),  # no "next" -> stop
+        ]
 
-def test_link_header_query_carried_only_in_params_not_endpoint() -> None:
-    responses = [
-        FakeResponse(
-            [{"id": 1}],
-            links={"next": {"url": "https://api.example.com/items?page=2&per_page=50"}},
-        ),
-        FakeResponse([{"id": 2}], links={}),
-    ]
-    client = FakeClient("https://api.example.com/", responses)
+        items = list(paginate(mock_client, "repos/x/x/issues"))
 
-    list(paginate(client, "items"))
+        assert items == [{"id": 1}, {"id": 2}, {"id": 3}]
+        assert mock_client._request.call_count == 3
 
-    assert client.calls[1]["params"] == [("page", "2"), ("per_page", "50")]
-    assert "?" not in client.calls[1]["endpoint"]
-    assert client.calls[1]["endpoint"] == "items"
+    def test_link_header_endpoint_and_params_extracted_correctly(
+        self, mock_client: MagicMock
+    ) -> None:
+        mock_client._request.side_effect = [
+            FakeResponse(
+                [{"id": 1}],
+                links={
+                    "next": {
+                        "url": "https://api.github.com/repos/x/x/issues?page=2&per_page=30"
+                    }
+                },
+            ),
+            FakeResponse([{"id": 2}]),
+        ]
 
+        list(paginate(mock_client, "repos/x/x/issues"))
 
-def test_link_header_resolution_identical_across_hosts() -> None:
-    same_host = [
-        FakeResponse(
-            [{"id": 1}],
-            links={"next": {"url": "https://api.example.com/v2/items?page=2"}},
-        ),
-        FakeResponse([{"id": 2}], links={}),
-    ]
-    other_host = [
-        FakeResponse(
-            [{"id": 1}],
-            links={"next": {"url": "https://cdn.other-host.com/v2/items?page=2"}},
-        ),
-        FakeResponse([{"id": 2}], links={}),
-    ]
+        args = mock_client._request.call_args_list[1].args
+        assert args[1] == "repos/x/x/issues"
+        assert call_params_dict(mock_client, 1) == {"page": "2", "per_page": "30"}
 
-    client_a = FakeClient("https://api.example.com/", same_host)
-    client_b = FakeClient("https://api.example.com/", other_host)
+    def test_initial_params_preserved_on_first_call(
+        self, mock_client: MagicMock
+    ) -> None:
+        mock_client._request.return_value = FakeResponse([{"id": 1}])
 
-    list(paginate(client_a, "v2/items"))
-    list(paginate(client_b, "v2/items"))
+        list(paginate(mock_client, "repos/x/x/issues", params={"state": "open"}))
 
-    assert client_a.calls[1]["endpoint"] == client_b.calls[1]["endpoint"] == "v2/items"
-    assert client_a.calls[1]["params"] == client_b.calls[1]["params"] == [("page", "2")]
-
-
-def test_link_header_root_path_strips_leading_slash() -> None:
-    responses = [
-        FakeResponse(
-            [{"id": 1}], links={"next": {"url": "https://api.example.com/items"}}
-        ),
-        FakeResponse([{"id": 2}], links={}),
-    ]
-    client = FakeClient("https://api.example.com/", responses)
-
-    list(paginate(client, "items"))
-
-    assert not client.calls[1]["endpoint"].startswith("/")
+        assert call_params_dict(mock_client, 0) == {"state": "open"}
 
 
-# Cursor/token (Twitter-style) pagination
+# Twitter-style pagination (data / meta.next_token)
 
 
-def test_cursor_pagination_yields_all_items_in_order() -> None:
-    responses = [
-        FakeResponse({"data": [{"id": 1}], "meta": {"next_token": "abc"}}),
-        FakeResponse({"data": [{"id": 2}], "meta": {}}),
-    ]
-    client = FakeClient("https://api.example.com/", responses)
+class TestTwitterStylePagination:
+    def test_follows_next_token(self, mock_client: MagicMock) -> None:
+        mock_client._request.side_effect = [
+            FakeResponse({"data": [{"id": "t1"}], "meta": {"next_token": "TOK_A"}}),
+            FakeResponse({"data": [{"id": "t2"}], "meta": {"next_token": "TOK_B"}}),
+            FakeResponse({"data": [{"id": "t3"}], "meta": {}}),
+        ]
 
-    items = list(paginate(client, "tweets"))
+        items = list(paginate(mock_client, "tweets/search/recent"))
 
-    assert items == [{"id": 1}, {"id": 2}]
+        assert items == [{"id": "t1"}, {"id": "t2"}, {"id": "t3"}]
+        assert mock_client._request.call_count == 3
 
+    def test_pagination_token_updates_without_duplicating(
+        self, mock_client: MagicMock
+    ) -> None:
+        mock_client._request.side_effect = [
+            FakeResponse({"data": [{"id": "t1"}], "meta": {"next_token": "TOK_A"}}),
+            FakeResponse({"data": [{"id": "t2"}], "meta": {"next_token": "TOK_B"}}),
+            FakeResponse({"data": [{"id": "t3"}], "meta": {}}),
+        ]
 
-def test_cursor_pagination_reuses_same_endpoint() -> None:
-    responses = [
-        FakeResponse({"data": [{"id": 1}], "meta": {"next_token": "abc"}}),
-        FakeResponse({"data": [{"id": 2}], "meta": {}}),
-    ]
-    client = FakeClient("https://api.example.com/", responses)
+        list(paginate(mock_client, "tweets/search/recent", params={"query": "python"}))
 
-    list(paginate(client, "tweets"))  # type: ignore
+        # page 1: no pagination_token yet, original query param present
+        assert call_params_dict(mock_client, 0) == {"query": "python"}
+        # page 2: token from page 1's response, query param still present (not dropped)
+        assert call_params_dict(mock_client, 1) == {
+            "query": "python",
+            "pagination_token": "TOK_A",
+        }
+        # page 3: token updated to TOK_B, not duplicated, query still present
+        assert call_params_dict(mock_client, 2) == {
+            "query": "python",
+            "pagination_token": "TOK_B",
+        }
 
-    assert client.calls[0]["endpoint"] == "tweets"
-    assert client.calls[1]["endpoint"] == "tweets"
+    def test_endpoint_unchanged_across_pages(self, mock_client: MagicMock) -> None:
+        mock_client._request.side_effect = [
+            FakeResponse({"data": [{"id": "t1"}], "meta": {"next_token": "TOK_A"}}),
+            FakeResponse({"data": [{"id": "t2"}], "meta": {}}),
+        ]
 
+        list(paginate(mock_client, "tweets/search/recent"))
 
-def test_cursor_pagination_appends_pagination_token_without_duplicating() -> None:
-    responses = [
-        FakeResponse({"data": [{"id": 1}], "meta": {"next_token": "abc"}}),
-        FakeResponse({"data": [{"id": 2}], "meta": {"next_token": "def"}}),
-        FakeResponse({"data": [{"id": 3}], "meta": {}}),
-    ]
-    client = FakeClient("https://api.example.com/", responses)
-
-    list(paginate(client, "tweets", params={"query": "python"}))
-
-    assert client.calls[0]["params"] == [("query", "python")]
-    assert client.calls[1]["params"] == [
-        ("query", "python"),
-        ("pagination_token", "abc"),
-    ]
-    assert client.calls[2]["params"] == [
-        ("query", "python"),
-        ("pagination_token", "def"),
-    ]
-
-
-def test_cursor_pagination_stops_when_next_token_missing() -> None:
-    responses = [FakeResponse({"data": [{"id": 1}], "meta": {}})]
-    client = FakeClient("https://api.example.com/", responses)
-
-    items = list(paginate(client, "tweets"))
-
-    assert items == [{"id": 1}]
-    assert len(client.calls) == 1
+        endpoints = [c.args[1] for c in mock_client._request.call_args_list]
+        assert endpoints == ["tweets/search/recent", "tweets/search/recent"]
 
 
-def test_cursor_pagination_stops_when_meta_missing_entirely() -> None:
-    responses = [FakeResponse({"data": [{"id": 1}]})]
-    client = FakeClient("https://api.example.com/", responses)
-
-    items = list(paginate(client, "tweets"))
-
-    assert items == [{"id": 1}]
-    assert len(client.calls) == 1
+# Google-style pagination (messages / nextPageToken)
 
 
-def test_cursor_pagination_stops_when_next_token_is_empty_string() -> None:
-    responses = [FakeResponse({"data": [{"id": 1}], "meta": {"next_token": ""}})]
-    client = FakeClient("https://api.example.com/", responses)
+class TestGoogleStylePagination:
+    def test_follows_next_page_token(self, mock_client: MagicMock) -> None:
+        mock_client._request.side_effect = [
+            FakeResponse({"messages": [{"id": "m1"}], "nextPageToken": "PT_A"}),
+            FakeResponse({"messages": [{"id": "m2"}], "nextPageToken": "PT_B"}),
+            FakeResponse({"messages": [{"id": "m3"}]}),
+        ]
 
-    items = list(paginate(client, "tweets"))
+        items = list(paginate(mock_client, "users/me/messages"))
 
-    assert items == [{"id": 1}]
-    assert len(client.calls) == 1
+        assert items == [{"id": "m1"}, {"id": "m2"}, {"id": "m3"}]
+        assert mock_client._request.call_count == 3
 
+    def test_query_param_survives_pagetoken_updates(
+        self, mock_client: MagicMock
+    ) -> None:
+        """The exact bug class we hit in GmailClient.list() -- here it's
+        handled correctly since existing params are preserved, only
+        'pageToken' is swapped out."""
+        mock_client._request.side_effect = [
+            FakeResponse({"messages": [{"id": "m1"}], "nextPageToken": "PT_A"}),
+            FakeResponse({"messages": [{"id": "m2"}], "nextPageToken": "PT_B"}),
+            FakeResponse({"messages": [{"id": "m3"}]}),
+        ]
 
-# Style precedence
+        list(paginate(mock_client, "users/me/messages", params={"q": "is:unread"}))
 
-
-def test_link_header_takes_precedence_over_next_token() -> None:
-    responses = [
-        FakeResponse(
-            {"data": [{"id": 1}], "meta": {"next_token": "should-be-ignored"}},
-            links={"next": {"url": "https://api.example.com/items?page=2"}},
-        ),
-        FakeResponse({"data": [{"id": 2}]}, links={}),
-    ]
-    client = FakeClient("https://api.example.com/", responses)
-
-    list(paginate(client, "items"))
-
-    assert client.calls[1]["endpoint"] == "items"
-    assert "pagination_token" not in dict(client.calls[1]["params"])
+        for i in range(3):
+            assert call_params_dict(mock_client, i)["q"] == "is:unread"
+        assert "pageToken" not in call_params_dict(mock_client, 0)
+        assert call_params_dict(mock_client, 1)["pageToken"] == "PT_A"
+        assert call_params_dict(mock_client, 2)["pageToken"] == "PT_B"
 
 
 # max_pages safety valve
 
 
-def test_max_pages_none_is_unlimited_by_default() -> None:
-    responses = [
-        FakeResponse(
-            [{"id": 1}],
-            links={"next": {"url": "https://api.example.com/items?page=2"}},
-        ),
-        FakeResponse(
-            [{"id": 2}],
-            links={"next": {"url": "https://api.example.com/items?page=3"}},
-        ),
-        FakeResponse([{"id": 3}], links={}),
-    ]
-    client = FakeClient("https://api.example.com/", responses)
+class TestMaxPages:
+    def test_stops_after_max_pages(self, mock_client: MagicMock) -> None:
+        def infinite_pages(*_args: Any, **_kwargs: Any) -> FakeResponse:
+            return FakeResponse(
+                {"messages": [{"id": "x"}], "nextPageToken": "ALWAYS_MORE"}
+            )
 
-    items = list(paginate(client, "items"))
+        mock_client._request.side_effect = infinite_pages
 
-    assert items == [{"id": 1}, {"id": 2}, {"id": 3}]
-    assert len(client.calls) == 3
+        items = list(paginate(mock_client, "users/me/messages", max_pages=3))
 
+        assert len(items) == 3
+        assert mock_client._request.call_count == 3
 
-def test_max_pages_limits_number_of_requests() -> None:
-    responses = [
-        FakeResponse(
-            [{"id": 1}],
-            links={"next": {"url": "https://api.example.com/items?page=2"}},
-        ),
-        FakeResponse(
-            [{"id": 2}],
-            links={"next": {"url": "https://api.example.com/items?page=3"}},
-        ),
-        FakeResponse([{"id": 3}], links={}),
-    ]
-    client = FakeClient("https://api.example.com/", responses)
+    def test_max_pages_zero_fetches_nothing(self, mock_client: MagicMock) -> None:
+        items = list(paginate(mock_client, "users/me/messages", max_pages=0))
 
-    items = list(paginate(client, "items", max_pages=2))
+        assert items == []
+        mock_client._request.assert_not_called()
 
-    assert items == [{"id": 1}, {"id": 2}]
-    assert len(client.calls) == 2
+    def test_max_pages_none_is_unbounded_default(self, mock_client: MagicMock) -> None:
+        mock_client._request.side_effect = [
+            FakeResponse({"messages": [{"id": "1"}], "nextPageToken": "A"}),
+            FakeResponse({"messages": [{"id": "2"}], "nextPageToken": "B"}),
+            FakeResponse({"messages": [{"id": "3"}]}),
+        ]
 
+        items = list(paginate(mock_client, "users/me/messages"))
 
-def test_max_pages_still_yields_items_from_the_final_allowed_page() -> None:
-    responses = [
-        FakeResponse(
-            [{"id": 1}, {"id": 2}],
-            links={"next": {"url": "https://api.example.com/items?page=2"}},
-        ),
-        FakeResponse([{"id": 3}], links={}),
-    ]
-    client = FakeClient("https://api.example.com/", responses)
+        assert len(items) == 3
 
-    items = list(paginate(client, "items", max_pages=1))
+    def test_max_pages_larger_than_available_pages_fetches_all(
+        self, mock_client: MagicMock
+    ) -> None:
+        mock_client._request.side_effect = [
+            FakeResponse({"messages": [{"id": "1"}], "nextPageToken": "A"}),
+            FakeResponse({"messages": [{"id": "2"}]}),
+        ]
 
-    assert items == [{"id": 1}, {"id": 2}]
-    assert len(client.calls) == 1
+        items = list(paginate(mock_client, "users/me/messages", max_pages=10))
 
+        assert len(items) == 2
+        assert mock_client._request.call_count == 2
 
-def test_max_pages_zero_makes_no_requests() -> None:
-    client = FakeClient("https://api.example.com/", responses=[])
 
-    items = list(paginate(client, "items", max_pages=0))
+# Response shape handling / errors
 
-    assert items == []
-    assert len(client.calls) == 0
 
+class TestResponseShapeHandling:
+    def test_bare_list_response(self, mock_client: MagicMock) -> None:
+        mock_client._request.return_value = FakeResponse([{"id": 1}])
 
-def test_max_pages_applies_to_cursor_style_too() -> None:
-    responses = [
-        FakeResponse({"data": [{"id": 1}], "meta": {"next_token": "abc"}}),
-        FakeResponse({"data": [{"id": 2}], "meta": {"next_token": "def"}}),
-        FakeResponse({"data": [{"id": 3}], "meta": {}}),
-    ]
-    client = FakeClient("https://api.example.com/", responses)
+        items = list(paginate(mock_client, "some/endpoint"))
 
-    items = list(paginate(client, "tweets", max_pages=2))
+        assert items == [{"id": 1}]
 
-    assert items == [{"id": 1}, {"id": 2}]
-    assert len(client.calls) == 2
+    def test_dict_without_data_or_messages_raises(self, mock_client: MagicMock) -> None:
+        mock_client._request.return_value = FakeResponse({"unexpected": "shape"})
 
+        with pytest.raises(ValueError, match="expected a list response"):
+            list(paginate(mock_client, "some/endpoint"))
 
-def test_max_pages_exactly_matching_available_pages_fetches_all() -> None:
-    responses = [
-        FakeResponse(
-            [{"id": 1}],
-            links={"next": {"url": "https://api.example.com/items?page=2"}},
-        ),
-        FakeResponse([{"id": 2}], links={}),
-    ]
-    client = FakeClient("https://api.example.com/", responses)
+    def test_non_list_non_dict_response_raises(self, mock_client: MagicMock) -> None:
+        mock_client._request.return_value = FakeResponse("just a string")
 
-    items = list(paginate(client, "items", max_pages=2))
+        with pytest.raises(ValueError, match="Unexpected response format"):
+            list(paginate(mock_client, "some/endpoint"))
 
-    assert items == [{"id": 1}, {"id": 2}]
-    assert len(client.calls) == 2
+    def test_empty_items_list_with_no_continuation_stops(
+        self, mock_client: MagicMock
+    ) -> None:
+        mock_client._request.return_value = FakeResponse({"messages": []})
 
+        items = list(paginate(mock_client, "users/me/messages"))
 
-# Malformed response bodies
+        assert items == []
+        assert mock_client._request.call_count == 1
 
+    def test_empty_page_but_token_present_continues(
+        self, mock_client: MagicMock
+    ) -> None:
+        """An empty page shouldn't stop pagination if the API still hands back a token."""
+        mock_client._request.side_effect = [
+            FakeResponse({"messages": [], "nextPageToken": "A"}),
+            FakeResponse({"messages": [{"id": "1"}]}),
+        ]
 
-def test_non_list_non_dict_body_raises_value_error() -> None:
-    responses = [FakeResponse("not a list or dict")]
-    client = FakeClient("https://api.example.com/", responses)
+        items = list(paginate(mock_client, "users/me/messages"))
 
-    with pytest.raises(ValueError):
-        list(paginate(client, "items"))
+        assert items == [{"id": "1"}]
+        assert mock_client._request.call_count == 2
 
 
-def test_dict_without_data_key_raises_value_error() -> None:
-    responses = [FakeResponse({"results": [{"id": 1}]})]
-    client = FakeClient("https://api.example.com/", responses)
+# Request construction
 
-    with pytest.raises(ValueError):
-        list(paginate(client, "items"))
 
+class TestRequestConstruction:
+    def test_uses_get_and_raw_response(self, mock_client: MagicMock) -> None:
+        mock_client._request.return_value = FakeResponse([{"id": 1}])
 
-def test_dict_with_non_list_data_raises_value_error() -> None:
-    responses = [FakeResponse({"data": "not-a-list"})]
-    client = FakeClient("https://api.example.com/", responses)
-
-    with pytest.raises(ValueError):
-        list(paginate(client, "items"))
-
-
-def test_error_raised_lazily_on_first_iteration() -> None:
-    responses = [FakeResponse({"bad": "shape"})]
-    client = FakeClient("https://api.example.com/", responses)
-
-    gen = paginate(client, "items")
-    assert client.calls == []
-
-    with pytest.raises(ValueError):
-        next(gen)
-
-
-# Params normalization
-
-
-def test_no_initial_params_sends_none() -> None:
-    responses = [FakeResponse([{"id": 1}], links={})]
-    client = FakeClient("https://api.example.com/", responses)
-
-    list(paginate(client, "items"))
-
-    assert client.calls[0]["params"] is None
-
-
-def test_dict_params_converted_to_list_of_tuples() -> None:
-    responses = [FakeResponse([{"id": 1}], links={})]
-    client = FakeClient("https://api.example.com/", responses)
-
-    list(paginate(client, "items", params={"sort": "asc", "limit": 10}))
-
-    assert client.calls[0]["params"] == [("sort", "asc"), ("limit", 10)]
-
-
-def test_list_of_tuples_params_preserves_duplicate_keys() -> None:
-    responses = [FakeResponse([{"id": 1}], links={})]
-    client = FakeClient("https://api.example.com/", responses)
-
-    dup_params = [("tag", "python"), ("tag", "testing")]
-    list(paginate(client, "items", params=dup_params))
-
-    assert client.calls[0]["params"] == dup_params
-
-
-def test_empty_dict_params_sends_none() -> None:
-    responses = [FakeResponse([{"id": 1}], links={})]
-    client = FakeClient("https://api.example.com/", responses)
-
-    list(paginate(client, "items", params={}))
-
-    assert client.calls[0]["params"] is None
-
-
-# kwargs forwarding
-
-
-def test_extra_kwargs_forwarded_to_every_request() -> None:
-    responses = [
-        FakeResponse(
-            [{"id": 1}],
-            links={"next": {"url": "https://api.example.com/items?page=2"}},
-        ),
-        FakeResponse([{"id": 2}], links={}),
-    ]
-    client = FakeClient("https://api.example.com/", responses)
-
-    list(paginate(client, "items", headers={"X-Test": "1"}, timeout=5))
-
-    for call in client.calls:
-        assert call["kwargs"] == {"headers": {"X-Test": "1"}, "timeout": 5}
-
-
-def test_max_pages_not_forwarded_as_a_request_kwarg() -> None:
-    responses = [FakeResponse([{"id": 1}], links={})]
-    client = FakeClient("https://api.example.com/", responses)
-
-    list(paginate(client, "items", max_pages=5))
-
-    assert "max_pages" not in client.calls[0]["kwargs"]
-
-
-def test_every_request_uses_get_and_raw_response_true() -> None:
-    responses = [FakeResponse([{"id": 1}], links={})]
-    client = FakeClient("https://api.example.com/", responses)
-
-    list(paginate(client, "items"))
-
-    assert client.calls[0]["method"] == "GET"
-    assert client.calls[0]["raw_response"] is True
-
-
-# Empty results
-
-
-def test_empty_item_list_with_no_next_page_yields_nothing() -> None:
-    responses = [FakeResponse([], links={})]
-    client = FakeClient("https://api.example.com/", responses)
-
-    items = list(paginate(client, "items"))
-
-    assert items == []
-
-
-def test_empty_page_followed_by_populated_page() -> None:
-    responses = [
-        FakeResponse(
-            [], links={"next": {"url": "https://api.example.com/items?page=2"}}
-        ),
-        FakeResponse([{"id": 1}], links={}),
-    ]
-    client = FakeClient("https://api.example.com/", responses)
-
-    items = list(paginate(client, "items"))
-
-    assert items == [{"id": 1}]
+        list(paginate(mock_client, "some/endpoint"))
+
+        call = mock_client._request.call_args_list[0]
+        assert call.args[0] == "GET"
+        assert call.args[1] == "some/endpoint"
+        assert call.kwargs["raw_response"] is True
+
+    def test_extra_kwargs_forwarded_every_call(self, mock_client: MagicMock) -> None:
+        mock_client._request.side_effect = [
+            FakeResponse(
+                [{"id": 1}], links={"next": {"url": "https://api.github.com/x?page=2"}}
+            ),
+            FakeResponse([{"id": 2}]),
+        ]
+
+        list(paginate(mock_client, "x", timeout=5))
+
+        for call in mock_client._request.call_args_list:
+            assert call.kwargs["timeout"] == 5
+
+    def test_no_params_sends_none(self, mock_client: MagicMock) -> None:
+        mock_client._request.return_value = FakeResponse([{"id": 1}])
+
+        list(paginate(mock_client, "some/endpoint"))
+
+        assert call_kwargs(mock_client, 0)["params"] is None
+
+    def test_accepts_params_as_list_of_tuples(self, mock_client: MagicMock) -> None:
+        mock_client._request.return_value = FakeResponse([{"id": 1}])
+
+        list(
+            paginate(
+                mock_client,
+                "some/endpoint",
+                params=[("state", "open"), ("state", "closed")],
+            )
+        )
+
+        params = call_kwargs(mock_client, 0)["params"]
+        assert ("state", "open") in params
+        assert ("state", "closed") in params

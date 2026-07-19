@@ -1,200 +1,183 @@
 """
-Unit tests for GmailClient.
-
-Strategy: mock `GmailClient.get()` and `GmailClient.get_messages_page()`
-directly rather than the underlying HTTP layer. GmailClient inherits its
-actual request machinery from BaseAPIClient, which should already have its
-own dedicated test suite — these tests only need to verify GmailClient's
-own logic: endpoint construction, parameter handling, and the pagination
-generator in get_all_messages().
-
+Tests for GmailClient and its resource classes.
 """
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from hakiapi.clients.gmail import GmailClient
+from hakiapi.clients.gmail import (
+    GmailClient,
+    GmailLabelsResource,
+    GmailMessagesResource,
+    GmailProfileResource,
+)
 from hakiapi.core.auth import BearerTokenAuth
 
 
+# Fixtures
+
+
 @pytest.fixture
-def client() -> GmailClient:
-    """Provides a reusable GmailClient instance with a dummy token."""
-    return GmailClient(token="fake-token")
+def mock_client() -> MagicMock:
+    """A stand-in for BaseAPIClient."""
+    return MagicMock()
 
 
-class TestInit:
-    def test_sets_correct_base_url(self, client: GmailClient) -> None:
-        # BaseAPIClient automatically strips trailing slashes to normalize URLs
-        assert client.base_url == "https://gmail.googleapis.com/gmail/v1"
-
-    def test_configures_bearer_token_auth(self) -> None:
-        client = GmailClient(token="my-secret-token")
-        # Auth is bound directly to the underlying requests.Session object
-        assert isinstance(getattr(client.session, "auth", None), BearerTokenAuth)
-
-    def test_forwards_extra_kwargs_to_base_client(self) -> None:
-        client = GmailClient(token="tok", timeout=30)
-        assert getattr(client, "timeout", None) == 30
+# GmailProfileResource
 
 
-class TestGetProfile:
-    def test_default_user_id(self, client: GmailClient) -> None:
-        with patch.object(
-            client, "get", return_value={"emailAddress": "me@example.com"}
-        ) as mock_get:
-            result = client.get_profile()
+class TestGmailProfileResource:
+    def test_get_default_user(self, mock_client: MagicMock) -> None:
+        resource = GmailProfileResource(mock_client)
+        mock_client.get.return_value = {"emailAddress": "me@example.com"}
 
-        mock_get.assert_called_once_with("users/me/profile")
+        result = resource.get()
+
+        mock_client.get.assert_called_once_with("users/me/profile")
         assert result == {"emailAddress": "me@example.com"}
 
-    def test_custom_user_id(self, client: GmailClient) -> None:
-        with patch.object(client, "get", return_value={}) as mock_get:
-            client.get_profile(user_id="someone@example.com")
+    def test_get_explicit_user(self, mock_client: MagicMock) -> None:
+        resource = GmailProfileResource(mock_client)
+        resource.get(user_id="someone@example.com")
 
-        mock_get.assert_called_once_with("users/someone@example.com/profile")
-
-    def test_forwards_extra_kwargs(self, client: GmailClient) -> None:
-        with patch.object(client, "get", return_value={}) as mock_get:
-            client.get_profile(timeout=5)
-
-        mock_get.assert_called_once_with("users/me/profile", timeout=5)
+        mock_client.get.assert_called_once_with("users/someone@example.com/profile")
 
 
-class TestGetMessage:
-    def test_builds_correct_endpoint(self, client: GmailClient) -> None:
-        with patch.object(client, "get", return_value={"id": "abc123"}) as mock_get:
-            result = client.get_message("abc123")
+# GmailLabelsResource
 
-        mock_get.assert_called_once_with("users/me/messages/abc123")
+
+class TestGmailLabelsResource:
+    def test_list_calls_correct_endpoint(self, mock_client: MagicMock) -> None:
+        resource = GmailLabelsResource(mock_client)
+        mock_client.get.return_value = {"labels": [{"id": "INBOX"}]}
+
+        result = resource.list()
+
+        mock_client.get.assert_called_once_with("users/me/labels")
+        assert result == {"labels": [{"id": "INBOX"}]}
+
+
+# GmailMessagesResource.get
+
+
+class TestGmailMessagesGet:
+    def test_get_message_by_id(self, mock_client: MagicMock) -> None:
+        resource = GmailMessagesResource(mock_client)
+        mock_client.get.return_value = {"id": "abc123"}
+
+        result = resource.get("abc123")
+
+        mock_client.get.assert_called_once_with("users/me/messages/abc123")
         assert result == {"id": "abc123"}
 
-    def test_custom_user_id(self, client: GmailClient) -> None:
-        with patch.object(client, "get", return_value={}) as mock_get:
-            client.get_message("abc123", user_id="other@example.com")
 
-        mock_get.assert_called_once_with("users/other@example.com/messages/abc123")
-
-    def test_forwards_extra_kwargs(self, client: GmailClient) -> None:
-        with patch.object(client, "get", return_value={}) as mock_get:
-            client.get_message("abc123", format="full")
-
-        mock_get.assert_called_once_with("users/me/messages/abc123", format="full")
+# GmailMessagesResource Pagination & Search
 
 
-class TestGetMessagesPage:
-    def test_no_page_token(self, client: GmailClient) -> None:
-        with patch.object(client, "get", return_value={"messages": []}) as mock_get:
-            client.get_messages_page()
+class TestGmailMessagesPaginationAndSearch:
+    @patch("hakiapi.clients.gmail.paginate")
+    def test_list_delegates_to_paginator(
+        self, mock_paginate: MagicMock, mock_client: MagicMock
+    ) -> None:
+        resource = GmailMessagesResource(mock_client)
+        mock_paginate.return_value = iter([{"id": "1"}, {"id": "2"}])
 
-        mock_get.assert_called_once_with("users/me/messages", params={})
+        messages = list(resource.list(user_id="someone", max_pages=5, timeout=10))
 
-    def test_with_page_token(self, client: GmailClient) -> None:
-        with patch.object(client, "get", return_value={"messages": []}) as mock_get:
-            client.get_messages_page(page_token="TOKEN123")
-
-        mock_get.assert_called_once_with(
-            "users/me/messages", params={"pageToken": "TOKEN123"}
+        assert messages == [{"id": "1"}, {"id": "2"}]
+        mock_paginate.assert_called_once_with(
+            client=mock_client,
+            endpoint="users/someone/messages",
+            max_pages=5,
+            timeout=10,
         )
 
-    def test_preserves_existing_params(self, client: GmailClient) -> None:
-        with patch.object(client, "get", return_value={"messages": []}) as mock_get:
-            client.get_messages_page(page_token="TOKEN123", params={"q": "is:unread"})
+    @patch("hakiapi.clients.gmail.paginate")
+    def test_search_injects_query_and_delegates(
+        self, mock_paginate: MagicMock, mock_client: MagicMock
+    ) -> None:
+        resource = GmailMessagesResource(mock_client)
+        mock_paginate.return_value = iter([{"id": "A"}])
 
-        mock_get.assert_called_once_with(
-            "users/me/messages",
-            params={"q": "is:unread", "pageToken": "TOKEN123"},
+        messages = list(resource.search("is:unread", user_id="me", max_pages=2))
+
+        assert messages == [{"id": "A"}]
+        mock_paginate.assert_called_once_with(
+            client=mock_client,
+            endpoint="users/me/messages",
+            max_pages=2,
+            params={"q": "is:unread"},
         )
 
-    def test_custom_user_id(self, client: GmailClient) -> None:
-        with patch.object(client, "get", return_value={"messages": []}) as mock_get:
-            client.get_messages_page(user_id="other@example.com")
-
-        mock_get.assert_called_once_with("users/other@example.com/messages", params={})
-
-
-class TestGetAllMessages:
-    def test_yields_messages_from_single_page(self, client: GmailClient) -> None:
-        response = {"messages": [{"id": "1"}, {"id": "2"}]}
-        with patch.object(
-            client, "get_messages_page", return_value=response
-        ) as mock_page:
-            results = list(client.get_all_messages())
-
-        assert results == [{"id": "1"}, {"id": "2"}]
-        mock_page.assert_called_once_with(user_id="me", page_token=None)
-
-    def test_follows_pagination_across_multiple_pages(
-        self, client: GmailClient
+    @patch("hakiapi.clients.gmail.paginate")
+    def test_search_preserves_existing_params(
+        self, mock_paginate: MagicMock, mock_client: MagicMock
     ) -> None:
-        page_1 = {"messages": [{"id": "1"}], "nextPageToken": "PAGE2"}
-        page_2 = {"messages": [{"id": "2"}], "nextPageToken": "PAGE3"}
-        page_3 = {"messages": [{"id": "3"}]}  # no nextPageToken -> stop
+        resource = GmailMessagesResource(mock_client)
 
-        with patch.object(
-            client, "get_messages_page", side_effect=[page_1, page_2, page_3]
-        ) as mock_page:
-            results = list(client.get_all_messages())
+        list(resource.search("label:INBOX", params={"includeSpamTrash": True}))
 
-        assert results == [{"id": "1"}, {"id": "2"}, {"id": "3"}]
-        assert mock_page.call_count == 3
-        mock_page.assert_any_call(user_id="me", page_token=None)
-        mock_page.assert_any_call(user_id="me", page_token="PAGE2")
-        mock_page.assert_any_call(user_id="me", page_token="PAGE3")
+        mock_paginate.assert_called_once_with(
+            client=mock_client,
+            endpoint="users/me/messages",
+            max_pages=None,
+            params={"q": "label:INBOX", "includeSpamTrash": True},
+        )
 
-    def test_stops_when_next_page_token_missing(self, client: GmailClient) -> None:
-        with patch.object(
-            client, "get_messages_page", return_value={"messages": [{"id": "1"}]}
-        ) as mock_page:
-            results = list(client.get_all_messages())
-
-        assert results == [{"id": "1"}]
-        mock_page.assert_called_once()
-
-    def test_handles_empty_inbox(self, client: GmailClient) -> None:
-        with patch.object(
-            client, "get_messages_page", return_value={"messages": []}
-        ) as mock_page:
-            results = list(client.get_all_messages())
-
-        assert results == []
-        mock_page.assert_called_once()
-
-    def test_handles_missing_messages_key(self, client: GmailClient) -> None:
-        # Defensive: API could theoretically omit "messages" on an empty inbox
-        with patch.object(client, "get_messages_page", return_value={}) as mock_page:
-            results = list(client.get_all_messages())
-
-        assert results == []
-        # Consume the variable to prove the internal HTTP layer was called
-        mock_page.assert_called_once()
-
-    def test_is_lazy_and_lets_caller_control_fetch_timing(
-        self, client: GmailClient
+    @patch("hakiapi.clients.gmail.paginate")
+    def test_search_does_not_mutate_caller_params(
+        self, mock_paginate: MagicMock, mock_client: MagicMock
     ) -> None:
-        page_1 = {"messages": [{"id": "1"}], "nextPageToken": "PAGE2"}
-        page_2 = {"messages": [{"id": "2"}]}
+        resource = GmailMessagesResource(mock_client)
+        caller_params = {"maxResults": 10}
 
-        with patch.object(
-            client, "get_messages_page", side_effect=[page_1, page_2]
-        ) as mock_page:
-            gen = client.get_all_messages()
-            assert mock_page.call_count == 0  # nothing fetched until iteration starts
+        list(resource.search("is:unread", params=caller_params))
 
-            assert next(gen) == {"id": "1"}
-            assert mock_page.call_count == 1
+        assert caller_params == {"maxResults": 10}
+        assert "q" not in caller_params
 
-            assert next(gen) == {"id": "2"}
-            assert mock_page.call_count == 2
 
-            with pytest.raises(StopIteration):
-                next(gen)
+# GmailMessagesResource.send
 
-    def test_forwards_extra_kwargs_to_each_page(self, client: GmailClient) -> None:
-        with patch.object(
-            client, "get_messages_page", return_value={"messages": []}
-        ) as mock_page:
-            list(client.get_all_messages(user_id="me", q="is:unread"))
 
-        mock_page.assert_called_once_with(user_id="me", page_token=None, q="is:unread")
+class TestGmailMessagesSend:
+    def test_send_posts_payload(self, mock_client: MagicMock) -> None:
+        resource = GmailMessagesResource(mock_client)
+        payload = {"raw": "base64url_encoded"}
+        mock_client.post.return_value = {"id": "sent123"}
+
+        result = resource.send(payload)
+
+        mock_client.post.assert_called_once_with("users/me/messages/send", json=payload)
+        assert result == {"id": "sent123"}
+
+    def test_send_with_explicit_user(self, mock_client: MagicMock) -> None:
+        resource = GmailMessagesResource(mock_client)
+        payload = {"raw": "abc"}
+
+        resource.send(payload, user_id="someone@example.com")
+
+        mock_client.post.assert_called_once_with(
+            "users/someone@example.com/messages/send", json=payload
+        )
+
+
+# GmailClient wiring
+
+
+class TestGmailClientWiring:
+    def test_mounts_resources(self) -> None:
+        client = GmailClient(token="fake-token")
+
+        assert isinstance(client.profile, GmailProfileResource)
+        assert isinstance(client.labels, GmailLabelsResource)
+        assert isinstance(client.messages, GmailMessagesResource)
+
+    def test_base_url_is_gmail_v1(self) -> None:
+        client = GmailClient(token="fake-token")
+        assert client.base_url == "https://gmail.googleapis.com/gmail/v1"
+
+    def test_uses_bearer_token_auth(self) -> None:
+        client = GmailClient(token="fake-token")
+        assert isinstance(getattr(client.session, "auth", None), BearerTokenAuth)
