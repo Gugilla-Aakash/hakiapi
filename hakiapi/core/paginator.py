@@ -40,7 +40,8 @@ def paginate(
         pages_fetched += 1
         data = response.json()
 
-        # Detect GitHub (list), Twitter ("data"), or Google ("messages")
+        # Detect GitHub (list), Twitter ("data"), Gmail ("messages"),
+        # or Calendar/Drive-style ("items")
         if isinstance(data, list):
             items = data
         elif isinstance(data, dict):
@@ -53,7 +54,7 @@ def paginate(
             else:
                 raise ValueError(
                     "Paginator expected a list response, or a dict with a "
-                    "'data' or 'messages' list."
+                    "'data', 'messages', or 'items' list."
                 )
         else:
             raise ValueError("Unexpected response format.")
@@ -61,7 +62,7 @@ def paginate(
         for item in items:
             yield item
 
-        # GitHub-style (Link header)
+        # 1. GitHub-style (Link header)
         if "next" in response.links:
             next_url = response.links["next"]["url"]
             parsed = urlparse(next_url)
@@ -69,7 +70,7 @@ def paginate(
             params = parse_qsl(parsed.query) if parsed.query else []
             continue
 
-        # Twitter-style (meta.next_token)
+        # 2. Twitter-style (meta.next_token)
         twitter_token = (
             data.get("meta", {}).get("next_token") if isinstance(data, dict) else None
         )
@@ -78,7 +79,7 @@ def paginate(
             params.append(("pagination_token", twitter_token))
             continue
 
-        # Google-style (nextPageToken)
+        # 3. Google-style (nextPageToken)
         google_token = data.get("nextPageToken") if isinstance(data, dict) else None
         if google_token:
             params = [(k, v) for k, v in params if k != "pageToken"]
