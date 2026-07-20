@@ -3,6 +3,7 @@
 from .core.base_client import BaseAPIClient
 from .clients.github import GitHubClient
 from .clients.gmail import GmailClient
+from .clients.google_calendar import GoogleCalendarClient
 
 from .core import exceptions
 from .core import auth
@@ -13,6 +14,7 @@ __all__ = [
     "BaseAPIClient",
     "GitHubClient",
     "GmailClient",
+    "GoogleCalendarClient",
     "exceptions",
     "auth",
     "retry",
