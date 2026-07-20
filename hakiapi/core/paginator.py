@@ -48,6 +48,8 @@ def paginate(
                 items = data["data"]
             elif isinstance(data.get("messages"), list):
                 items = data["messages"]
+            elif isinstance(data.get("items"), list):
+                items = data["items"]
             else:
                 raise ValueError(
                     "Paginator expected a list response, or a dict with a "
