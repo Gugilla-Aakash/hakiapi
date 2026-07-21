@@ -49,8 +49,8 @@ HakiAPI extracts all of that into one reusable core, so every client you build o
 | ⚠️ Typed exception hierarchy | `RateLimitError`, `AuthenticationError`, `ClientError`, `ServerError`, `RequestTimeoutError`, all rooted in `HakiAPIError` |
 | 🌐 Persistent HTTP sessions | Connection pooling via `requests.Session`, closed automatically with `with` |
 | 🧩 Extensible base client | Subclass `BaseAPIClient`, inherit everything above for free |
-| 📦 Ready-to-use clients | GitHub, Gmail |
-| 🧪 Fully tested | 214 tests, full coverage of core + clients |
+| 📦 Ready-to-use clients | GitHub, Gmail, GoogleCalendar |
+| 🧪 Fully tested | 220+ tests, full coverage of core + clients |
 | 🐍 Python 3.10+ | Fully type-hinted |
 
 ---
@@ -262,6 +262,7 @@ hakiapi/
 └── clients/
     ├── github.py            # GitHubClient
     └── gmail.py             # GmailClient
+    └── google_calendar.py   # GoogleCalendarClient
 ```
 
 ---
@@ -301,9 +302,9 @@ pytest
 - [x] Typed exception hierarchy
 - [x] GitHub client
 - [x] Gmail client
+- [x] Google Calendar client
 
 **Planned**
-- [ ] Google Calendar client
 - [ ] Stripe client
 - [ ] Twitter/X client
 - [ ] Async client (`httpx`-based)
