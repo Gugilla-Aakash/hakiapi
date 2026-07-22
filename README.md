@@ -37,6 +37,70 @@ HakiAPI extracts all of that into one reusable core, so every client you build o
 | Pagination | Write a `while` loop per API's pagination style | Auto-detects Link-header and cursor/token pagination, iterated lazily |
 | New service client | Copy-paste session + error-handling code | Subclass `BaseAPIClient`, define endpoints, done |
 
+### A real example: fetching your 3 latest unread emails
+
+Talk is cheap — here's the same task, side by side. No auth boilerplate, no manual pagination, no hand-rolled URLs.
+
+**❌ Without HakiAPI**
+
+```python
+import requests
+import os
+
+token = os.environ["GMAIL_OAUTH_TOKEN"]
+headers = {"Authorization": f"Bearer {token}"}
+base_url = "https://gmail.googleapis.com/gmail/v1/users/me"
+
+params = {"q": "is:unread"}
+unread_messages = []
+
+# Keep pulling pages until we have 3 messages or run out of pages
+while True:
+    response = requests.get(f"{base_url}/messages", headers=headers, params=params)
+    response.raise_for_status()
+    data = response.json()
+
+    for msg in data.get("messages", []):
+        unread_messages.append(msg)
+        if len(unread_messages) >= 3:
+            break
+
+    if len(unread_messages) >= 3 or "nextPageToken" not in data:
+        break
+
+    params["pageToken"] = data["nextPageToken"]
+
+# Fetch the full body for each message
+for msg in unread_messages:
+    msg_data = requests.get(f"{base_url}/messages/{msg['id']}", headers=headers).json()
+    print(msg_data.get("snippet"))
+```
+
+**✅ With HakiAPI**
+
+```python
+import os
+from hakiapi import GmailClient
+
+token = os.environ["GMAIL_OAUTH_TOKEN"]
+
+with GmailClient(token=token) as gmail:
+    # Auth, retries, and pagination are handled for you
+    unread_messages = gmail.messages.search(query="is:unread", max_pages=1)
+
+    for count, msg in enumerate(unread_messages):
+        if count >= 3:
+            break
+        full_msg = gmail.messages.get(message_id=msg["id"])
+        print(full_msg.get("snippet"))
+```
+
+What HakiAPI handles for you here:
+
+- **Pagination** — Google-style `nextPageToken` (and Link-header pagination elsewhere) is followed automatically, with a `max_pages` safety valve so you never accidentally loop forever.
+- **Resource routing** — `client.resource.action()` instead of hand-building URLs and re-typing the same base path everywhere.
+- **Type safety** — built with static analysis in mind, so tools like Ruff and Pyright stay useful instead of fighting `dict` soup.
+
 ---
 
 ## ✨ Features
