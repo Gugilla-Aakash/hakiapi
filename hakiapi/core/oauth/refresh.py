@@ -1,7 +1,6 @@
 """
 Handles the OAuth 2.0 token refresh lifecycle.
 """
-
 import time
 from typing import Any
 
@@ -46,7 +45,6 @@ def refresh_access_token(
         ) from e
 
     if not response.ok:
-        # If Google rejects the refresh token (e.g., user revoked access or it expired),
         # wipe the useless token from the store so the framework forces a fresh login next time.
         store.delete_token()
         raise OAuthFlowError(
@@ -56,15 +54,12 @@ def refresh_access_token(
 
     payload: dict[str, Any] = response.json()
 
-    # The Magic Trick: Google might issue a new refresh token, or they might
-    # expect us to keep using the old one. We fall back to the old one if needed.
     new_refresh_token = payload.get("refresh_token", token.refresh_token)
 
     # Calculate the exact timestamp when this new access token will die
     expires_in = payload.get("expires_in")
     expires_at = time.time() + expires_in if expires_in is not None else None
 
-    # Google doesn't always echo scopes back on a refresh if they haven't changed
     granted_scope = payload.get("scope")
     scopes = granted_scope.split() if granted_scope else list(token.scopes)
 
