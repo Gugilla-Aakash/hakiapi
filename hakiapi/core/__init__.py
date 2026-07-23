@@ -3,6 +3,7 @@ from . import exceptions
 from . import auth
 from . import retry
 from . import paginator
+from . import oauth
 
 __all__ = [
     "BaseAPIClient",
@@ -10,4 +11,5 @@ __all__ = [
     "auth",
     "retry",
     "paginator",
+    "oauth",
 ]

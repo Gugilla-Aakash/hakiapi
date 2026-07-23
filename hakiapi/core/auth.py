@@ -1,9 +1,27 @@
 import hashlib
 import hmac
 import time
+import requests
+from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from requests.auth import AuthBase
 from requests import PreparedRequest
+
+
+class OAuth2Auth(AuthBase):
+    """
+    Dynamically injects an OAuth 2.0 Access Token into the Authorization header.
+    It automatically triggers a refresh or interactive login if the token is missing or expired.
+    """
+
+    def __init__(self, flow: Any) -> None:
+        self.flow = flow
+
+    def __call__(self, r: requests.PreparedRequest) -> requests.PreparedRequest:
+        # get_token() does all the heavy lifting: loading, refreshing, or prompting login
+        token = self.flow.get_token()
+        r.headers["Authorization"] = f"Bearer {token.access_token}"
+        return r
 
 
 class BearerTokenAuth(AuthBase):
