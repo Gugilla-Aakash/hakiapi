@@ -15,3 +15,4 @@ build/
 
 # Ruff
 .ruff_cache/
+my_secure_token.json
