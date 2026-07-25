@@ -259,7 +259,7 @@ class TestResponseShapeHandling:
     def test_dict_without_data_or_messages_raises(self, mock_client: MagicMock) -> None:
         mock_client._request.return_value = FakeResponse({"unexpected": "shape"})
 
-        with pytest.raises(ValueError, match="expected a list response"):
+        with pytest.raises(ValueError, match="Unexpected pagination response"):
             list(paginate(mock_client, "some/endpoint"))
 
     def test_non_list_non_dict_response_raises(self, mock_client: MagicMock) -> None:
