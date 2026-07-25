@@ -51,11 +51,15 @@ def paginate(
                 items = data["messages"]
             elif isinstance(data.get("items"), list):
                 items = data["items"]
+
+            # Fixed google email pagination bug when it returns 0 results
+            elif data.get("resultSizeEstimate") == 0:
+                break
             else:
-                raise ValueError(
-                    "Paginator expected a list response, or a dict with a "
-                    "'data', 'messages', or 'items' list."
-                )
+                print("Unexpected response:")
+                print(data)
+
+                raise ValueError(f"Unexpected pagination response: {data}")
         else:
             raise ValueError("Unexpected response format.")
 
