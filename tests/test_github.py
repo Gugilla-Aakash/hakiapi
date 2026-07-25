@@ -6,6 +6,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 from hakiapi.clients.github import GitHubClient
+from hakiapi.core.exceptions import HakiAPIError
 
 
 def _fake_base_init(
@@ -17,7 +18,7 @@ def _fake_base_init(
     self.session = MagicMock()
 
 
-def _build_client(token: str | None = None, **kwargs: Any) -> GitHubClient:
+def _build_client(token: str | None = None, **kwargs: Any) -> Any:
     with patch("hakiapi.core.base_client.BaseAPIClient.__init__", new=_fake_base_init):
         return GitHubClient(token=token, **kwargs)
 
@@ -35,7 +36,7 @@ def test_init_without_token_creates_no_auth() -> None:
         gh = _build_client(token=None)
 
     mock_auth_cls.assert_not_called()
-    assert getattr(gh, "auth") is None
+    assert gh.auth is None
 
 
 def test_init_with_token_creates_bearer_token_auth() -> None:
@@ -44,7 +45,7 @@ def test_init_with_token_creates_bearer_token_auth() -> None:
         gh = _build_client(token="secret-token")
 
     mock_auth_cls.assert_called_once_with("secret-token")
-    assert getattr(gh, "auth") == "AUTH_OBJECT"
+    assert gh.auth == "AUTH_OBJECT"
 
 
 def test_init_forwards_extra_kwargs_to_base_client() -> None:
@@ -55,7 +56,7 @@ def test_init_forwards_extra_kwargs_to_base_client() -> None:
 def test_init_sets_required_github_headers() -> None:
     gh = _build_client()
 
-    mock_update = getattr(gh.session.headers, "update")
+    mock_update = gh.session.headers.update
     mock_update.assert_called_once_with(
         {
             "Accept": "application/vnd.github+json",
@@ -83,6 +84,68 @@ def test_get_user_forwards_kwargs() -> None:
         gh.get_user("octocat", timeout=5)
 
         mock_get.assert_called_once_with("users/octocat", timeout=5)
+
+
+# search_users
+
+
+def test_search_users_calls_get_with_correct_endpoint_and_query() -> None:
+    gh = _build_client()
+    with patch.object(
+        gh, "get", return_value={"total_count": 1, "items": [{"login": "octocat"}]}
+    ) as mock_get:
+        result = gh.search_users("octocat")
+
+        mock_get.assert_called_once_with("search/users", params={"q": "octocat"})
+        assert result == {"total_count": 1, "items": [{"login": "octocat"}]}
+
+
+def test_search_users_merges_extra_params_with_query() -> None:
+    gh = _build_client()
+    with patch.object(gh, "get", return_value={}) as mock_get:
+        gh.search_users("octocat", params={"per_page": 5})
+
+        mock_get.assert_called_once_with(
+            "search/users", params={"per_page": 5, "q": "octocat"}
+        )
+
+
+def test_search_users_forwards_non_params_kwargs() -> None:
+    gh = _build_client()
+    with patch.object(gh, "get", return_value={}) as mock_get:
+        gh.search_users("octocat", timeout=5)
+
+        mock_get.assert_called_once_with(
+            "search/users", params={"q": "octocat"}, timeout=5
+        )
+
+
+# get_all_search_users
+
+
+def test_get_all_search_users_calls_paginate_with_query_param() -> None:
+    gh = _build_client()
+
+    # Using list() forces the lazy generator to execute and trigger paginate
+    with patch(
+        "hakiapi.clients.github.paginate", return_value=iter([{"login": "octocat"}])
+    ) as mock_paginate:
+        result = list(gh.get_all_search_users("octocat"))
+
+    mock_paginate.assert_called_once_with(gh, "search/users", params={"q": "octocat"})
+    assert result == [{"login": "octocat"}]
+
+
+def test_get_all_search_users_merges_extra_params_with_query() -> None:
+    gh = _build_client()
+    with patch(
+        "hakiapi.clients.github.paginate", return_value=iter([])
+    ) as mock_paginate:
+        list(gh.get_all_search_users("octocat", params={"per_page": 10}, max_pages=2))
+
+    mock_paginate.assert_called_once_with(
+        gh, "search/users", params={"per_page": 10, "q": "octocat"}, max_pages=2
+    )
 
 
 # get_user_repos
@@ -124,15 +187,14 @@ def test_get_repo_languages_calls_get_with_correct_endpoint() -> None:
 
 def test_get_all_user_repos_calls_paginate_with_client_and_endpoint() -> None:
     gh = _build_client()
-    sentinel = iter([{"name": "repo1"}])
 
     with patch(
-        "hakiapi.clients.github.paginate", return_value=sentinel
+        "hakiapi.clients.github.paginate", return_value=iter([{"name": "repo1"}])
     ) as mock_paginate:
-        result = gh.get_all_user_repos("octocat")
+        result = list(gh.get_all_user_repos("octocat"))
 
     mock_paginate.assert_called_once_with(gh, "users/octocat/repos")
-    assert result is sentinel
+    assert result == [{"name": "repo1"}]
 
 
 def test_get_all_user_repos_forwards_kwargs_to_paginate() -> None:
@@ -141,7 +203,7 @@ def test_get_all_user_repos_forwards_kwargs_to_paginate() -> None:
     with patch(
         "hakiapi.clients.github.paginate", return_value=iter([])
     ) as mock_paginate:
-        gh.get_all_user_repos("octocat", params={"per_page": 5}, max_pages=2)
+        list(gh.get_all_user_repos("octocat", params={"per_page": 5}, max_pages=2))
 
     mock_paginate.assert_called_once_with(
         gh, "users/octocat/repos", params={"per_page": 5}, max_pages=2
@@ -226,7 +288,8 @@ def test_aggregate_languages_continues_past_a_single_repo_failure() -> None:
         patch.object(
             gh,
             "get_repo_languages",
-            side_effect=[RuntimeError("404 repo deleted"), {"Python": 42}],
+            # We now correctly throw the expected HakiAPIError here
+            side_effect=[HakiAPIError("404 repo deleted"), {"Python": 42}],
         ) as mock_get_lang,
     ):
         result = gh.get_aggregate_user_languages("octocat")

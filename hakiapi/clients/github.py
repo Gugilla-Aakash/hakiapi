@@ -1,7 +1,9 @@
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 
-from hakiapi.core.base_client import BaseAPIClient
 from hakiapi.core.auth import BearerTokenAuth
+from hakiapi.core.base_client import BaseAPIClient
+from hakiapi.core.exceptions import HakiAPIError
 from hakiapi.core.paginator import paginate
 
 
@@ -27,6 +29,32 @@ class GitHubClient(BaseAPIClient):
         """Fetch a GitHub user's profile."""
         return self.get(f"users/{username}", **kwargs)
 
+    def search_users(self, query: str, **kwargs: Any) -> dict[str, Any]:
+        """
+        Search GitHub users matching a query string.
+
+        Returns the raw GitHub search response, e.g.:
+        {"total_count": N, "incomplete_results": bool, "items": [...]}
+        """
+        # Safely cast to a dictionary, protecting against list-of-tuples
+        params: dict[str, Any] = dict(kwargs.pop("params", None) or {})
+        params["q"] = query
+
+        return self.get("search/users", params=params, **kwargs)
+
+    def get_all_search_users(
+        self, query: str, **kwargs: Any
+    ) -> Iterator[dict[str, Any]]:
+        """
+        Search GitHub users matching a query string, auto-paginating
+        through every page of results (GitHub's Link-header pagination).
+        """
+        params: dict[str, Any] = dict(kwargs.pop("params", None) or {})
+        params["q"] = query
+
+        # Delegated directly to the paginator using yield from
+        yield from paginate(self, "search/users", params=params, **kwargs)
+
     def get_user_repos(self, username: str, **kwargs: Any) -> list[dict[str, Any]]:
         """Fetch a single page of public repositories of a GitHub user."""
         return self.get(f"users/{username}/repos", **kwargs)
@@ -35,7 +63,8 @@ class GitHubClient(BaseAPIClient):
         self, username: str, **kwargs: Any
     ) -> Iterator[dict[str, Any]]:
         """Fetch ALL public repositories using automatic pagination."""
-        return paginate(self, f"users/{username}/repos", **kwargs)
+        # Delegated directly to the paginator using yield from
+        yield from paginate(self, f"users/{username}/repos", **kwargs)
 
     def get_repo_languages(
         self, owner: str, repo: str, **kwargs: Any
@@ -67,7 +96,7 @@ class GitHubClient(BaseAPIClient):
                     aggregate_languages[lang] = (
                         aggregate_languages.get(lang, 0) + bytes_count
                     )
-            except Exception:
+            except HakiAPIError:
                 # Shield the iteration sequence if a single repo is deleted or inaccessible
                 continue
 
