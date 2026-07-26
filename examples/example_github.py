@@ -1,32 +1,68 @@
 """
-Example usage of the HakiAPI GitHub Client.
+Example usage of GitHubClient.
+
+Before running:
+
+    export GITHUB_TOKEN="your_personal_access_token"
 """
+
+import os
+from pprint import pprint
 
 from hakiapi.clients.github import GitHubClient
 
 
 def main() -> None:
-    with GitHubClient() as gh:
-        target_user = "Gugilla-Aakash"
+    github = GitHubClient(token=os.environ["GITHUB_TOKEN"])
 
-        user_data = gh.get_user(target_user)
+    username = "Gugilla-Aakash"
 
-        print(f"User: {user_data.get('name')}")
-        print(f"Public Repos: {user_data.get('public_repos')}")
+    print("== User ==")
+    pprint(github.get_user(username))
 
-        print(f"Aggregating all languages for {target_user} across public repos...")
+    print("\n== Search Users ==")
+    pprint(github.search_users("torvalds")["items"][:3])
 
-        lang_stats = gh.get_aggregate_user_languages(
-            target_user, params={"per_page": 5}
-        )
+    print("\n== All Search Users ==")
+    for user in github.get_all_search_users("python"):
+        print(user["login"])
+        break
 
-        total_bytes = sum(lang_stats.values())
-        print("\nLanguage Breakdown (by byte allocation):")
-        for lang, byte_count in sorted(
-            lang_stats.items(), key=lambda item: item[1], reverse=True
-        ):
-            percentage = (byte_count / total_bytes) * 100 if total_bytes > 0 else 0
-            print(f"- {lang}: {byte_count} bytes ({percentage:.2f}%)")
+    print("\n== User Repositories ==")
+    repos = github.get_user_repos(username)
+    print(f"Found {len(repos)} repositories.")
+
+    print("\n== All User Repositories ==")
+    print(f"Total: {len(list(github.get_all_user_repos(username)))}")
+
+    if repos:
+        repo = repos[0]["name"]
+
+        print("\n== Repository Languages ==")
+        pprint(github.get_repo_languages(username, repo))
+
+    print("\n== Aggregate Languages ==")
+    pprint(github.get_aggregate_user_languages(username))
+
+    print("\n== User Activity ==")
+    pprint(github.get_user_authored_activity(username))
+
+    print("\n== Execute GraphQL ==")
+    result = github.execute_graphql(
+        """
+        query($login: String!) {
+          user(login: $login) {
+            login
+            name
+          }
+        }
+        """,
+        variables={"login": username},
+    )
+    pprint(result)
+
+    print("\n== User Contributions ==")
+    pprint(github.get_user_contributions(username))
 
 
 if __name__ == "__main__":
