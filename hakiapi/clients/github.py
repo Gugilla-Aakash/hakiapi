@@ -25,6 +25,7 @@ class GitHubClient(BaseAPIClient):
             }
         )
 
+    # REST API: Profiles & Repositories
     def get_user(self, username: str, **kwargs: Any) -> dict[str, Any]:
         """Fetch a GitHub user's profile."""
         return self.get(f"users/{username}", **kwargs)
@@ -36,7 +37,6 @@ class GitHubClient(BaseAPIClient):
         Returns the raw GitHub search response, e.g.:
         {"total_count": N, "incomplete_results": bool, "items": [...]}
         """
-        # Safely cast to a dictionary, protecting against list-of-tuples
         params: dict[str, Any] = dict(kwargs.pop("params", None) or {})
         params["q"] = query
 
@@ -47,12 +47,11 @@ class GitHubClient(BaseAPIClient):
     ) -> Iterator[dict[str, Any]]:
         """
         Search GitHub users matching a query string, auto-paginating
-        through every page of results (GitHub's Link-header pagination).
+        through every page of results.
         """
         params: dict[str, Any] = dict(kwargs.pop("params", None) or {})
         params["q"] = query
 
-        # Delegated directly to the paginator using yield from
         yield from paginate(self, "search/users", params=params, **kwargs)
 
     def get_user_repos(self, username: str, **kwargs: Any) -> list[dict[str, Any]]:
@@ -63,7 +62,6 @@ class GitHubClient(BaseAPIClient):
         self, username: str, **kwargs: Any
     ) -> Iterator[dict[str, Any]]:
         """Fetch ALL public repositories using automatic pagination."""
-        # Delegated directly to the paginator using yield from
         yield from paginate(self, f"users/{username}/repos", **kwargs)
 
     def get_repo_languages(
@@ -80,8 +78,6 @@ class GitHubClient(BaseAPIClient):
         map of all languages used, down to the smallest byte.
         """
         aggregate_languages: dict[str, int] = {}
-
-        # Pull all repos lazily via our paginator engine
         repos = self.get_all_user_repos(username, **kwargs)
 
         for repo in repos:
@@ -90,14 +86,100 @@ class GitHubClient(BaseAPIClient):
                 continue
 
             try:
-                # Query the specific byte-breakdown for this exact repo pointer
                 languages = self.get_repo_languages(username, repo_name)
                 for lang, bytes_count in languages.items():
                     aggregate_languages[lang] = (
                         aggregate_languages.get(lang, 0) + bytes_count
                     )
             except HakiAPIError:
-                # Shield the iteration sequence if a single repo is deleted or inaccessible
                 continue
 
         return aggregate_languages
+
+    # REST API: Search & Activity
+
+    def get_user_authored_activity(
+        self, username: str, **kwargs: Any
+    ) -> dict[str, Any]:
+        """
+        Fetches authored Pull Requests and Issues across GitHub for collaboration signals.
+        Returns total counts and a short list of recent items for both.
+        """
+        pr_query = f"author:{username} type:pr"
+        issue_query = f"author:{username} type:issue"
+
+        # Fetch up to 5 recent PRs
+        prs = self.get("search/issues", params={"q": pr_query, "per_page": 5}, **kwargs)
+        # Fetch up to 5 recent issues
+        issues = self.get(
+            "search/issues", params={"q": issue_query, "per_page": 5}, **kwargs
+        )
+
+        return {
+            "pull_requests": {
+                "total_count": prs.get("total_count", 0),
+                "recent_items": prs.get("items", []),
+            },
+            "issues": {
+                "total_count": issues.get("total_count", 0),
+                "recent_items": issues.get("items", []),
+            },
+        }
+
+    # GraphQL Engine
+
+    def execute_graphql(
+        self, query: str, variables: dict[str, Any] | None = None, **kwargs: Any
+    ) -> dict[str, Any]:
+        """
+        The low-level execution engine for all GraphQL requests.
+        Safely traps GraphQL '200 OK' payloads that contain hidden query errors.
+        """
+        payload: dict[str, Any] = {"query": query}
+        if variables:
+            payload["variables"] = variables
+
+        response_data = self.post("graphql", json=payload, **kwargs)
+
+        # GraphQL notoriously returns 200 OK even if the query fails, putting the error in the body
+        if "errors" in response_data:
+            error_msgs = [
+                err.get("message", "Unknown GraphQL error")
+                for err in response_data["errors"]
+            ]
+            raise HakiAPIError(f"GraphQL Error(s): {', '.join(error_msgs)}")
+
+        return response_data.get("data", {})
+
+    def get_user_contributions(
+        self,
+        username: str,
+        from_date: str | None = None,
+        to_date: str | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """
+        Fetches contribution count and calendar data via GraphQL.
+        Note: from_date and to_date must be ISO 8601 strings (e.g. '2023-01-01T00:00:00Z').
+        """
+        query = """
+        query($login: String!, $from: DateTime, $to: DateTime) {
+            user(login: $login) {
+                contributionsCollection(from: $from, to: $to) {
+                    contributionCalendar {
+                        totalContributions
+                    }
+                    totalCommitContributions
+                    totalIssueContributions
+                    totalPullRequestContributions
+                }
+            }
+        }
+        """
+        variables: dict[str, Any] = {"login": username}
+        if from_date:
+            variables["from"] = from_date
+        if to_date:
+            variables["to"] = to_date
+
+        return self.execute_graphql(query, variables=variables, **kwargs)

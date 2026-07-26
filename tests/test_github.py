@@ -327,3 +327,256 @@ def test_aggregate_languages_does_not_forward_kwargs_to_get_repo_languages() -> 
         gh.get_aggregate_user_languages("octocat", params={"per_page": 5}, timeout=10)
 
         mock_get_lang.assert_called_once_with("octocat", "repo1")
+
+
+# get_user_authored_activity
+
+
+def test_get_user_authored_activity_fetches_prs_and_issues() -> None:
+    gh = _build_client()
+
+    pr_response = {
+        "total_count": 2,
+        "items": [{"title": "Fix bug"}, {"title": "Add feature"}],
+    }
+    issue_response = {
+        "total_count": 1,
+        "items": [{"title": "Report bug"}],
+    }
+
+    with patch.object(
+        gh,
+        "get",
+        side_effect=[pr_response, issue_response],
+    ) as mock_get:
+        result = gh.get_user_authored_activity("octocat")
+
+    assert mock_get.call_count == 2
+
+    mock_get.assert_any_call(
+        "search/issues",
+        params={"q": "author:octocat type:pr", "per_page": 5},
+    )
+    mock_get.assert_any_call(
+        "search/issues",
+        params={"q": "author:octocat type:issue", "per_page": 5},
+    )
+
+    assert result == {
+        "pull_requests": {
+            "total_count": 2,
+            "recent_items": pr_response["items"],
+        },
+        "issues": {
+            "total_count": 1,
+            "recent_items": issue_response["items"],
+        },
+    }
+
+
+def test_get_user_authored_activity_forwards_kwargs() -> None:
+    gh = _build_client()
+
+    with patch.object(
+        gh,
+        "get",
+        side_effect=[
+            {"total_count": 0, "items": []},
+            {"total_count": 0, "items": []},
+        ],
+    ) as mock_get:
+        gh.get_user_authored_activity("octocat", timeout=10)
+
+    assert mock_get.call_args_list[0].kwargs["timeout"] == 10
+    assert mock_get.call_args_list[1].kwargs["timeout"] == 10
+
+
+# execute_graphql
+
+
+def test_execute_graphql_posts_query_and_returns_data() -> None:
+    gh = _build_client()
+
+    graphql_data = {"user": {"login": "octocat"}}
+
+    with patch.object(
+        gh,
+        "post",
+        return_value={"data": graphql_data},
+    ) as mock_post:
+        result = gh.execute_graphql("query { viewer { login } }")
+
+    mock_post.assert_called_once_with(
+        "graphql",
+        json={"query": "query { viewer { login } }"},
+    )
+    assert result == graphql_data
+
+
+def test_execute_graphql_includes_variables() -> None:
+    gh = _build_client()
+
+    variables = {"login": "octocat"}
+
+    with patch.object(
+        gh,
+        "post",
+        return_value={"data": {}},
+    ) as mock_post:
+        gh.execute_graphql("query Test {}", variables=variables)
+
+    mock_post.assert_called_once_with(
+        "graphql",
+        json={
+            "query": "query Test {}",
+            "variables": variables,
+        },
+    )
+
+
+def test_execute_graphql_raises_hakiapi_error_when_errors_present() -> None:
+    gh = _build_client()
+
+    with patch.object(
+        gh,
+        "post",
+        return_value={
+            "errors": [
+                {"message": "Bad query"},
+                {"message": "Unauthorized"},
+            ]
+        },
+    ):
+        try:
+            gh.execute_graphql("query {}")
+            assert False, "Expected HakiAPIError"
+        except HakiAPIError as exc:
+            assert str(exc) == "GraphQL Error(s): Bad query, Unauthorized"
+
+
+def test_execute_graphql_uses_default_error_message() -> None:
+    gh = _build_client()
+
+    with patch.object(
+        gh,
+        "post",
+        return_value={"errors": [{}]},
+    ):
+        try:
+            gh.execute_graphql("query {}")
+            assert False, "Expected HakiAPIError"
+        except HakiAPIError as exc:
+            assert str(exc) == "GraphQL Error(s): Unknown GraphQL error"
+
+
+def test_execute_graphql_forwards_kwargs() -> None:
+    gh = _build_client()
+
+    with patch.object(
+        gh,
+        "post",
+        return_value={"data": {}},
+    ) as mock_post:
+        gh.execute_graphql("query {}", timeout=5)
+
+    mock_post.assert_called_once_with(
+        "graphql",
+        json={"query": "query {}"},
+        timeout=5,
+    )
+
+
+# get_user_contributions
+
+
+def test_get_user_contributions_calls_execute_graphql() -> None:
+    gh = _build_client()
+
+    expected = {"user": {"contributionsCollection": {}}}
+
+    with patch.object(
+        gh,
+        "execute_graphql",
+        return_value=expected,
+    ) as mock_exec:
+        result = gh.get_user_contributions("octocat")
+
+    query = mock_exec.call_args.args[0]
+    variables = mock_exec.call_args.kwargs["variables"]
+
+    assert "contributionsCollection" in query
+    assert variables == {"login": "octocat"}
+    assert result == expected
+
+
+def test_get_user_contributions_includes_date_filters() -> None:
+    gh = _build_client()
+
+    with patch.object(
+        gh,
+        "execute_graphql",
+        return_value={},
+    ) as mock_exec:
+        gh.get_user_contributions(
+            "octocat",
+            from_date="2024-01-01T00:00:00Z",
+            to_date="2024-12-31T23:59:59Z",
+        )
+
+    assert mock_exec.call_args.kwargs["variables"] == {
+        "login": "octocat",
+        "from": "2024-01-01T00:00:00Z",
+        "to": "2024-12-31T23:59:59Z",
+    }
+
+
+def test_get_user_contributions_forwards_kwargs() -> None:
+    gh = _build_client()
+
+    with patch.object(
+        gh,
+        "execute_graphql",
+        return_value={},
+    ) as mock_exec:
+        gh.get_user_contributions("octocat", timeout=15)
+
+    assert mock_exec.call_args.kwargs["timeout"] == 15
+
+
+def test_execute_graphql_omits_variables_when_none() -> None:
+    gh = _build_client()
+
+    with patch.object(
+        gh,
+        "post",
+        return_value={"data": {}},
+    ) as mock_post:
+        gh.execute_graphql("query Test", variables=None)
+
+    mock_post.assert_called_once_with(
+        "graphql",
+        json={"query": "query Test"},
+    )
+
+
+def test_get_user_contributions_only_includes_from_date() -> None:
+    gh = _build_client()
+
+    with patch.object(
+        gh,
+        "execute_graphql",
+        return_value={},
+    ) as mock_exec:
+        gh.get_user_contributions(
+            "octocat",
+            from_date="2024-01-01T00:00:00Z",
+        )
+
+    query = mock_exec.call_args.args[0]
+    variables = mock_exec.call_args.kwargs["variables"]
+
+    assert "contributionsCollection" in query
+    assert variables == {
+        "login": "octocat",
+        "from": "2024-01-01T00:00:00Z",
+    }
