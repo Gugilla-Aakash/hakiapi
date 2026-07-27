@@ -4,18 +4,18 @@
 
 ### Build production-grade Python API SDKs — not boilerplate.
 
-Authentication · Self-Healing OAuth 2.0 · Retries · Pagination · Typed Exceptions
+Authentication · OAuth 2.0 · Retries · Pagination · Typed Exceptions
 
 [![PyPI](https://img.shields.io/pypi/v/hakiapi?style=for-the-badge)](https://pypi.org/project/hakiapi/)
 [![Python](https://img.shields.io/pypi/pyversions/hakiapi?style=for-the-badge)](https://pypi.org/project/hakiapi/)
 [![License](https://img.shields.io/github/license/Gugilla-Aakash/hakiapi?style=for-the-badge)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-280%2B_passing-success?style=for-the-badge)](#testing)
+[![Tests](https://img.shields.io/badge/tests-300_passing-success?style=for-the-badge)](#testing)
 [![Typing](https://img.shields.io/badge/typing-fully_typed-blue?style=for-the-badge)](#features)
 [![Downloads](https://img.shields.io/pypi/dm/hakiapi?style=for-the-badge)](https://pypistats.org/packages/hakiapi)
 
 **Stop rewriting authentication, retries, and pagination for every API client you build.**
 
-[Installation](#installation) • [Quick Start](#quick-start) • [Features](#features) • [Architecture](#architecture) • [Create Your Own Client](#create-your-own-client) • [Roadmap](#roadmap)
+[Installation](#installation) • [Quick Start](#quick-start) • [Features](#features) • [Core Concepts](#core-concepts) • [Bundled Clients](#bundled-clients) • [Create Your Own Client](#create-your-own-client) • [Architecture](#architecture--project-structure) • [Roadmap](#roadmap)
 
 </div>
 
@@ -25,17 +25,18 @@ Authentication · Self-Healing OAuth 2.0 · Retries · Pagination · Typed Excep
 
 Every API client grows the same infrastructure, in the same order. You start with a simple HTTP call. Then you add authentication. Then retries. Then pagination. Then timeout and exception handling. A month later, you've rebuilt the same plumbing you already wrote for the last five projects.
 
-HakiAPI extracts all of that into one reusable core, so every client you build on top of it inherits enterprise-grade behavior automatically. Instead of writing infrastructure, you write business logic.
+HakiAPI extracts all of that into one reusable core (`BaseAPIClient`), so every client you build on top of it inherits the same battle-tested behavior automatically. Instead of writing infrastructure, you write endpoint logic.
 
-### Without HakiAPI vs. with HakiAPI
+### Raw `requests` vs. HakiAPI
 
 | | Raw `requests` | HakiAPI |
 |---|---|---|
-| **OAuth 2.0 Flow** | Copy-paste URLs, manually spin up servers, hand-roll refreshes | Fully automated local interceptor + atomic token vault + auto-refresh |
-| **Retry Logic** | Write your own `urllib3.Retry` + `HTTPAdapter` wiring | Built into `BaseAPIClient` with exponential backoff on 429/50x |
-| **Static Auth** | Reimplement Bearer/HMAC/API keys per project | 4 reusable `AuthBase` strategies, drop-in |
-| **Error Handling** | Manually check `response.status_code` everywhere | Raised as statically-typed, catchable exceptions |
-| **Pagination** | Write a custom `while` loop per API's pagination style | Auto-detects Link-header & cursor pagination, iterated lazily |
+| **OAuth 2.0 Flow** | Hand-roll the consent URL, spin up a redirect server, parse the callback yourself | `GoogleOAuthFlow` builds the consent URL, opens the browser, catches the redirect on `localhost`, verifies CSRF `state`, and exchanges the code for you |
+| **Token Persistence** | Read/write a JSON file yourself and hope nothing corrupts it mid-write | `FileTokenStore` writes atomically (temp file + `os.replace`) with `0600` permissions |
+| **Retry Logic** | Wire up your own `urllib3.Retry` + `HTTPAdapter` | Built into every `BaseAPIClient` session with exponential backoff on `429/500/502/503/504` |
+| **Static Auth** | Reimplement Bearer/HMAC/API-key headers per project | 5 reusable `AuthBase` strategies, drop-in |
+| **Error Handling** | Manually branch on `response.status_code` everywhere | Raised as a typed, catchable exception hierarchy carrying `status_code` and the original `response` |
+| **Pagination** | Write a custom `while` loop per API's pagination style | `paginate()` auto-detects Link-header, `data`/`meta.next_token`, `messages`/`nextPageToken`, and `items`/`nextPageToken` styles, yielding lazily |
 
 ---
 
@@ -43,13 +44,14 @@ HakiAPI extracts all of that into one reusable core, so every client you build o
 
 | Feature | Details |
 |---|---|
-| 🔄 **Self-Healing OAuth 2.0** | Interactive local server interceptor, CSRF-protected browser flow, and background token refreshing. |
-| 🗄️ **Atomic Token Vault** | `FileTokenStore` guarantees zero state corruption during concurrent writes using secure temp-file swapping. |
-| 🔐 **Multiple Auth Strategies** | `BearerTokenAuth`, `HeaderApiKeyAuth`, `QueryApiKeyAuth`, `HmacAuth`. |
-| 🔁 **Automatic Retries** | Exponential backoff on `429/500/502/503/504`, mounted transparently on every session. |
-| 📄 **Smart Pagination** | Auto-detects Link-header (GitHub-style) and cursor/token (`meta.next_token`) pagination. |
-| ⚠️ **Typed Exceptions** | `RateLimitError`, `AuthenticationError`, `ClientError`, `ServerError`, `RequestTimeoutError`. |
-| 📦 **Ready-to-use Clients** | GitHub, Gmail, GoogleCalendar out of the box. |
+| 🔐 **Interactive OAuth 2.0 Flow** | `GoogleOAuthFlow` drives Google's Authorization Code flow end-to-end: builds the consent URL, opens the system browser, boots a one-shot local `HTTPServer` to catch the redirect, validates the CSRF `state` token, and exchanges the code for tokens. |
+| 🔁 **Manual Token Refresh** | `refresh_access_token()` exchanges a stored `refresh_token` for a new `access_token` without user interaction, and wipes the token store automatically if Google reports the grant as revoked. |
+| 🗄️ **Atomic Token Vault** | `FileTokenStore` persists tokens to a local JSON file by writing to a temp file and swapping it in with `os.replace()`, so a crash mid-write can never leave a corrupted token file. The file is `chmod 0600`. |
+| 🔐 **Multiple Auth Strategies** | `BearerTokenAuth`, `HeaderApiKeyAuth`, `QueryApiKeyAuth`, `HmacAuth` (SHA-256 request signing), and `OAuth2Auth` for wiring a `GoogleOAuthFlow` directly into a `requests.Session`. |
+| 🔁 **Automatic Retries** | `create_retry_adapter()` mounts an `HTTPAdapter` with exponential backoff on `429/500/502/503/504` onto every `BaseAPIClient` session, deferring status handling to HakiAPI's own exceptions via `raise_on_status=False`. |
+| 📄 **Smart Pagination** | `paginate()` auto-detects GitHub-style `Link` headers, Twitter-style `meta.next_token`, Gmail-style `messages` + `nextPageToken`, and Calendar-style `items` + `nextPageToken` — all as one lazy generator. |
+| ⚠️ **Typed Exceptions** | `RateLimitError` (with `retry_after`), `AuthenticationError` (401/403), `ClientError` (4xx), `ServerError` (5xx), `RequestTimeoutError` — all inherit from `HakiAPIError`, which carries `status_code` and the original `response`. |
+| 📦 **Ready-to-use Clients** | `GitHubClient` (REST + GraphQL), `GmailClient`, `GoogleCalendarClient` — out of the box. |
 
 ---
 
@@ -57,64 +59,69 @@ HakiAPI extracts all of that into one reusable core, so every client you build o
 
 ```bash
 pip install hakiapi
-
 ```
 
-Requires **Python 3.10+**.
+Requires **Python 3.10+**. Core dependencies are `requests>=2.32.0` and `urllib3>=1.26.0`.
 
 ---
 
 ## Quick Start
 
-### 1. The Full-Cycle OAuth 2.0 Engine (Google Calendar)
+### 1. Interactive OAuth 2.0 (Google Calendar)
 
-Stop forcing users to copy and paste authorization codes. HakiAPI handles the complete browser flow, securely saves the state to an atomic file vault, and **automatically refreshes expired tokens in the background.**
+`GoogleOAuthFlow.get_token()` checks the `TokenStore` first. If a valid, non-expired token is already saved, it's returned immediately. Otherwise it opens your browser, runs the full consent flow, and persists the result:
 
 ```python
 import os
+from dotenv import load_dotenv
 from hakiapi.clients.google_calendar import GoogleCalendarClient
-from hakiapi.core.oauth import GoogleOAuthFlow, FileTokenStore
+from hakiapi.core.oauth.google import GoogleOAuthFlow
+from hakiapi.core.oauth.token_store import FileTokenStore
 
-# 1. Set up the secure vault and flow logic
+# Load variables from your .env file into os.environ
+load_dotenv()
+
+# 1. Set up the flow and the token vault
 oauth_flow = GoogleOAuthFlow(
-    client_id=os.environ.get("GOOGLE_CLIENT_ID"),
-    client_secret=os.environ.get("GOOGLE_CLIENT_SECRET"),
+    client_id=os.environ["GOOGLE_CLIENT_ID"],
+    client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
     scopes=["https://www.googleapis.com/auth/calendar.readonly"],
     store=FileTokenStore("my_secure_token.json"),
-    redirect_port=8765, 
+    redirect_port=8765,  # must match an authorized redirect URI in Google Cloud Console
 )
 
-# 2. .get_token() does the heavy lifting: 
-# It loads the token if valid, silently refreshes if expired, 
-# or opens the browser and spins up a local interceptor if missing!
+# 2. get_token() returns the cached token if it's still valid,
+#    otherwise it opens the browser and runs the full consent flow.
 token = oauth_flow.get_token()
 
-# 3. Initialize your client
+# 3. Initialize your client with the raw access token
 with GoogleCalendarClient(token=token.access_token) as calendar:
     for event in calendar.events.upcoming(max_results=3):
         print(event.get("summary"))
-
 ```
+
+> **Note:** `get_token()` does **not** silently refresh an expired token — it re-runs the interactive consent flow when the stored token is missing or expired. If you want silent, non-interactive refreshes using a saved `refresh_token`, call `refresh_access_token()` from `hakiapi.core.oauth.refresh` explicitly (see [OAuth 2.0](#oauth-20) below).
 
 ### 2. Automatic Pagination (GitHub)
 
-Forget page numbers, `while` loops, and manually checking for a `next` page. HakiAPI follows Link headers and cursor pagination automatically, lazily yielding results:
+Forget page numbers, `while` loops, and manually checking for a `next` page. `paginate()` follows Link headers automatically and yields lazily:
 
 ```python
 from hakiapi.clients.github import GitHubClient
 
 with GitHubClient() as github:
-    # Lazily iterates through every repository, handling all HTTP requests behind the scenes
+    # Lazily walks every page of the user's public repos
     for repo in github.get_all_user_repos("torvalds"):
         print(repo["name"])
-
 ```
 
 ---
 
-## Exception Handling
+## Core Concepts
 
-Never check HTTP status codes manually again. Every exception inherits from `HakiAPIError`, carrying the `status_code` and original `response` object.
+### Exception Handling
+
+Every exception raised by `BaseAPIClient._request()` inherits from `HakiAPIError`, carrying `status_code` and the original `response` object:
 
 ```python
 from hakiapi.core.exceptions import AuthenticationError, RateLimitError, ServerError
@@ -127,40 +134,148 @@ except AuthenticationError:
     print("Invalid credentials.")
 except ServerError:
     print("GitHub is currently unavailable.")
-
 ```
+
+| Exception | Raised when | Extra attributes |
+|---|---|---|
+| `RateLimitError` | HTTP `429` | `retry_after` — parsed from the `Retry-After` header, if present |
+| `AuthenticationError` | HTTP `401` / `403` | `auth_method` |
+| `ClientError` | Any other `4xx` | — |
+| `ServerError` | Any `5xx` | — |
+| `RequestTimeoutError` | The request times out at the network level (no HTTP response was ever received) | `timeout_duration` |
+
+### Authentication Strategies (`core/auth.py`)
+
+All strategies implement `requests.auth.AuthBase`, so they drop straight into `BaseAPIClient(auth=...)`:
+
+```python
+from hakiapi.core.auth import BearerTokenAuth, HeaderApiKeyAuth, QueryApiKeyAuth, HmacAuth
+```
+
+- **`BearerTokenAuth(token)`** — sets `Authorization: Bearer <token>`.
+- **`HeaderApiKeyAuth(header_name, api_key)`** — injects the key under a custom header.
+- **`QueryApiKeyAuth(param_name, api_key)`** — appends the key as a query parameter, preserving any existing query string.
+- **`HmacAuth(api_key, secret_key, ...)`** — signs each request with HMAC-SHA256 over `METHOD\nPATH\nTIMESTAMP\nBODY` (newline-delimited to prevent field-collision signature forgery), sending the key, timestamp, and signature as headers. Raises `TypeError` for streaming bodies, which aren't supported.
+- **`OAuth2Auth(flow)`** — wraps any object exposing `get_token()` (like `GoogleOAuthFlow`) and injects a fresh `Authorization: Bearer` header on every request.
+
+### Retry Engine (`core/retry.py`)
+
+`create_retry_adapter()` builds an `HTTPAdapter` backed by `urllib3.util.Retry`:
+
+- **3 retries by default**, with an exponential `backoff_factor` of `1.0`.
+- Retries on `429, 500, 502, 503, 504` by default (configurable via `status_forcelist`).
+- `raise_on_status=False` — `urllib3` never raises on its own; HakiAPI's typed exceptions handle the final failure.
+- Mounted on both `http://` and `https://` for every `BaseAPIClient` session automatically.
+
+### Smart Pagination (`core/paginator.py`)
+
+`paginate(client, endpoint, max_pages=None, **kwargs)` is a generator that keeps requesting pages until it runs out, detecting the item list and the "next page" signal from the response shape:
+
+| Response shape | Items key | Next-page signal |
+|---|---|---|
+| Raw JSON list | the list itself | `Link` response header (`rel="next"`) |
+| `{"data": [...], "meta": {...}}` (Twitter/X-style) | `data` | `meta.next_token` |
+| `{"messages": [...], "nextPageToken": ...}` (Gmail-style) | `messages` | `nextPageToken` |
+| `{"items": [...], "nextPageToken": ...}` (Calendar-style) | `items` | `nextPageToken` |
+| `{"resultSizeEstimate": 0}` (Gmail empty result) | — | stops cleanly, no error |
+
+Any other shape raises `ValueError("Unexpected pagination response: ...")`. Pass `max_pages` to cap how many pages are fetched.
+
+### OAuth 2.0 (`core/oauth/`)
+
+The OAuth engine is split into three independent pieces:
+
+- **`token_store.py`** — `OAuthToken` (a dataclass with `access_token`, `refresh_token`, `expires_at`, `scopes`, and an `is_expired` property with a 30-second leeway buffer) and the `TokenStore` abstract base class. `FileTokenStore` is the concrete implementation: it serializes tokens to JSON, writes atomically via a temp file + `os.replace()`, and sets `0600` permissions on the file.
+- **`google.py`** — `GoogleOAuthFlow` drives the full interactive Authorization Code flow: builds the consent URL (`access_type=offline`, `prompt=consent` to force a refresh token on every run), opens it with `webbrowser.open()`, boots a one-shot `http.server.HTTPServer` on `localhost:<redirect_port>` to catch the redirect, validates the CSRF `state` parameter, and exchanges the authorization code for tokens via a direct POST to Google's token endpoint. Raises `OAuthFlowError` on denial, timeout, a `state` mismatch, or a failed exchange.
+- **`refresh.py`** — `refresh_access_token(token, client_id, client_secret, store)` is a standalone function that exchanges a saved `refresh_token` for a new `access_token` without opening a browser. If Google rejects the refresh (revoked/invalid grant), it calls `store.delete_token()` so the next `get_token()` call cleanly falls back to the interactive flow.
+
+These three pieces are intentionally decoupled — `GoogleOAuthFlow.get_token()` only checks expiry and re-runs the interactive flow if needed; wiring in silent refreshes via `refresh_access_token()` is left to the caller (or to `OAuth2Auth`, once you build that logic into your own `flow` object).
 
 ---
 
-## Architecture & Project Structure
+## Bundled Clients
 
-HakiAPI is designed with strict separation of concerns. Every service client inherits production-ready infrastructure automatically.
+### `GitHubClient` — REST + GraphQL
 
-```text
-hakiapi/
-├── core/
-│   ├── oauth/               # The Self-Healing OAuth 2.0 Engine
-│   │   ├── google.py        # Local server interceptor & CSRF protection
-│   │   ├── token_store.py   # Atomic file vault for token persistence
-│   │   └── refresh.py       # Background token refresh logic
-│   ├── auth.py              # Static auth strategies (Bearer, HMAC, API Keys)
-│   ├── retry.py             # Exponential-backoff HTTPAdapter factory
-│   ├── paginator.py         # Link-header + cursor/token pagination
-│   ├── base_client.py       # Request lifecycle & session management
-│   └── exceptions.py        # Typed exception hierarchy
-│
-└── clients/
-    ├── github.py            # GitHub API implementation
-    ├── gmail.py             # Gmail API implementation
-    └── google_calendar.py   # Google Calendar implementation
+```python
+from hakiapi.clients.github import GitHubClient
 
+with GitHubClient(token="ghp_...") as gh:  # token is optional for public endpoints
+    gh.get_user("torvalds")
+    gh.search_users("location:hyderabad")
+    gh.get_all_search_users("python")            # auto-paginated generator
+    gh.get_user_repos("torvalds")                 # single page
+    gh.get_all_user_repos("torvalds")              # auto-paginated generator
+    gh.get_repo_languages("torvalds", "linux")
+    gh.get_aggregate_user_languages("torvalds")    # sums languages across every repo
+    gh.get_user_authored_activity("torvalds")      # recent authored PRs + issues
+    gh.execute_graphql(query, variables={...})     # raises HakiAPIError on GraphQL-level errors
+    gh.get_user_contributions("torvalds", from_date="2025-01-01T00:00:00Z")
 ```
+
+`get_aggregate_user_languages()` walks every repository returned by `get_all_user_repos()` and silently skips any repo whose language lookup raises `HakiAPIError`, so one broken/empty repo doesn't fail the whole aggregation.
+
+#### GraphQL Engine
+
+`GitHubClient` isn't purely REST — it also ships a GraphQL execution layer on top of the same `BaseAPIClient` infrastructure, so GraphQL calls get the same retries, timeout handling, and auth as everything else.
+
+```python
+from hakiapi.clients.github import GitHubClient
+
+with GitHubClient(token="ghp_...") as gh:
+    data = gh.execute_graphql(
+        """
+        query($login: String!) {
+            user(login: $login) {
+                name
+                bio
+            }
+        }
+        """,
+        variables={"login": "torvalds"},
+    )
+    print(data["user"]["name"])
+```
+
+- **`execute_graphql(query, variables=None, **kwargs)`** — the low-level engine. It `POST`s `{"query": ..., "variables": ...}` to GitHub's `/graphql` endpoint and unwraps the response. GraphQL is notorious for returning HTTP `200 OK` even when the query itself failed, with the real error buried in the response body — `execute_graphql` checks for an `"errors"` key in the payload and raises a `HakiAPIError` joining every message it finds, instead of letting a broken query silently return `None`. On success it returns just the `"data"` portion of the payload.
+- **`get_user_contributions(username, from_date=None, to_date=None, **kwargs)`** — a ready-made query built on top of `execute_graphql`. It fetches a user's `contributionsCollection`: total contributions, commit contributions, issue contributions, and pull-request contributions, optionally scoped to a date range. `from_date`/`to_date` must be ISO 8601 strings (e.g. `"2025-01-01T00:00:00Z"`).
+
+### `GmailClient` — resource-based routing
+
+```python
+from hakiapi import GmailClient
+
+with GmailClient(token=access_token) as gmail:
+    gmail.profile.get()                    # users/{id}/profile
+    gmail.labels.list()                    # users/{id}/labels
+    gmail.messages.get(message_id)         # a single message
+    gmail.messages.list(max_pages=2)       # auto-paginated generator
+    gmail.messages.search("is:unread")     # auto-paginated generator with a query
+    gmail.messages.send({"raw": base64_rfc2822_string})
+```
+
+### `GoogleCalendarClient` — resource-based routing
+
+```python
+from hakiapi import GoogleCalendarClient
+
+with GoogleCalendarClient(token=access_token) as cal:
+    cal.calendars.list(max_pages=1)
+    cal.events.get(event_id)
+    cal.events.list(calendar_id="primary")
+    cal.events.today()                       # midnight-to-midnight UTC, recurring events expanded
+    cal.events.upcoming(max_results=5)        # next N events from now, single page
+    cal.events.create({"summary": "...", "start": {...}, "end": {...}})
+    cal.events.delete(event_id)
+```
+
+`today()` and `upcoming()` both auto-fill `timeMin`/`timeMax`, set `singleEvents=True` to expand recurring events, and sort by `startTime` — you only pass the calendar ID.
 
 ---
 
 ## Create Your Own Client
 
-Creating a new SDK is intentionally simple: subclass `BaseAPIClient`, point it at a base URL, and define your endpoints as plain methods.
+Subclass `BaseAPIClient`, point it at a base URL, and define your endpoints as plain methods. Authentication, retries, timeout handling, and typed exceptions are inherited automatically:
 
 ```python
 from hakiapi import BaseAPIClient
@@ -184,25 +299,32 @@ if __name__ == "__main__":
     with WeatherClient() as client:
         weather = client.get_weather(latitude=17.385, longitude=78.4867)
         print(weather["current_weather"])
-
 ```
 
-### Output
+`BaseAPIClient` exposes `get`, `post`, `put`, `patch`, and `delete`, all routed through `_request()`, which handles the retry-mounted session, timeout errors, status-code-to-exception mapping, and JSON/text response parsing (falling back to `response.text` if the body isn't valid JSON). Pass `raw_response=True` to get the raw `requests.Response` instead — this is what `paginate()` uses internally to read the `Link` header.
 
-```json
-{
-    "time": "2026-07-24T22:00",
-    "interval": 900, 
-    "temperature": 30.6, 
-    "windspeed": 13.9, 
-    "winddirection": 271, 
-    "is_day": 0, 
-    "weathercode": 51
-}
+---
 
+## Architecture & Project Structure
+
+```text
+hakiapi/
+├── core/
+│   ├── oauth/
+│   │   ├── google.py         # GoogleOAuthFlow — interactive Authorization Code flow
+│   │   ├── refresh.py        # refresh_access_token() — silent refresh via refresh_token
+│   │   └── token_store.py    # OAuthToken, TokenStore (ABC), FileTokenStore
+│   ├── auth.py                # BearerTokenAuth, HeaderApiKeyAuth, QueryApiKeyAuth, HmacAuth, OAuth2Auth
+│   ├── retry.py                # create_retry_adapter() — exponential-backoff HTTPAdapter factory
+│   ├── paginator.py            # paginate() — Link-header + token-based pagination
+│   ├── base_client.py          # BaseAPIClient — session, retries, exception mapping
+│   └── exceptions.py           # HakiAPIError hierarchy
+│
+└── clients/
+    ├── github.py               # GitHubClient — REST + GraphQL
+    ├── gmail.py                # GmailClient — profile / labels / messages resources
+    └── google_calendar.py      # GoogleCalendarClient — calendars / events resources
 ```
-
-*Authentication, retries, pagination, sessions, and exceptions are entirely inherited — you only write the endpoint logic.*
 
 ---
 
@@ -222,14 +344,13 @@ if __name__ == "__main__":
 ```bash
 pip install hakiapi[dev]
 pytest
-
 ```
 
-* ✅ **280+ tests passing**
-* ✅ Core framework covered (auth, retry, paginator, base client, exceptions)
-* ✅ Full OAuth 2.0 engine mocked and covered
-* ✅ Atomic file vault concurrency tested
-* ✅ Client implementations covered
+* ✅ **300 tests passing**
+* ✅ Core framework covered: `auth`, `retry`, `paginator`, `base_client`, `exceptions`
+* ✅ Full OAuth 2.0 engine covered: `google.py` (interactive flow) and `refresh.py` (silent refresh), fully mocked
+* ✅ `FileTokenStore` atomic-write behavior covered
+* ✅ `GitHubClient`, `GmailClient`, `GoogleCalendarClient` covered
 
 ---
 
@@ -238,17 +359,19 @@ pytest
 **Completed**
 
 * [x] Base API framework (`BaseAPIClient`)
-* [x] Authentication system (Bearer, Header, Query, HMAC)
+* [x] Authentication strategies (Bearer, Header API Key, Query API Key, HMAC, OAuth2)
 * [x] Retry engine with exponential backoff
-* [x] Automatic pagination (Link header + cursor/token)
+* [x] Automatic pagination (Link header, `data`/`meta`, `messages`/`items` + token styles)
 * [x] Typed exception hierarchy
-* [x] Full-cycle OAuth 2.0 Engine (Local server, Vault, Auto-Refresh)
-* [x] GitHub, Gmail, & Google Calendar clients
+* [x] Interactive Google OAuth 2.0 flow (local redirect interceptor, CSRF-protected)
+* [x] Atomic `FileTokenStore` and standalone silent-refresh routine
+* [x] `GitHubClient`, `GmailClient`, `GoogleCalendarClient`
 
 **Planned**
 
 * [ ] Stripe client
 * [ ] Twitter/X client
+* [ ] Wire automatic silent refresh into `GoogleOAuthFlow.get_token()`
 * [ ] Async client (`httpx`-based)
 * [ ] Plugin system
 
@@ -262,7 +385,7 @@ Contributions are welcome — bug fixes, documentation, tests, or new clients. P
 
 ## License
 
-MIT License — see [LICENSE](https://www.google.com/search?q=LICENSE) for details.
+MIT License — see [LICENSE](LICENSE) for details.
 
 ---
 
