@@ -1,5 +1,7 @@
-from typing import Any
+from typing import Any, TypeVar
 import httpx
+
+T = TypeVar("T", bound="AsyncBaseAPIClient")
 
 
 class AsyncBaseAPIClient:
@@ -17,3 +19,12 @@ class AsyncBaseAPIClient:
             auth=auth,
             timeout=self.timeout,
         )
+
+    async def close(self) -> None:
+        await self.client.aclose()
+
+    async def __aenter__(self: T) -> T:
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        await self.close()
