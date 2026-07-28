@@ -1,5 +1,6 @@
 from typing import Any, TypeVar
 import httpx
+from .exceptions import HakiAPIError, RequestTimeoutError
 
 T = TypeVar("T", bound="AsyncBaseAPIClient")
 
@@ -35,10 +36,23 @@ class AsyncBaseAPIClient:
         endpoint: str,
         **kwargs: Any,
     ) -> Any:
-        response = await self.client.request(
-            method=method,
-            url=endpoint.lstrip("/"),
-            **kwargs,
-        )
+        request_timeout = kwargs.pop("timeout", self.timeout)
+
+        try:
+            response = await self.client.request(
+                method=method,
+                url=endpoint.lstrip("/"),
+                timeout=request_timeout,
+                **kwargs,
+            )
+
+        except httpx.TimeoutException as e:
+            raise RequestTimeoutError(
+                message="Request timed out.",
+                timeout_duration=float(request_timeout) if request_timeout else None,
+            ) from e
+
+        except httpx.RequestError as e:
+            raise HakiAPIError(message=str(e)) from e
 
         return response.json()
