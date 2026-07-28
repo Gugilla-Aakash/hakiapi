@@ -109,3 +109,18 @@ class AsyncBaseAPIClient:
             return response.json()
         except ValueError:
             return response.text
+
+    async def get(self, endpoint: str, **kwargs: Any) -> Any:
+        return await self._request("GET", endpoint, **kwargs)
+
+    async def post(self, endpoint: str, **kwargs: Any) -> Any:
+        return await self._request("POST", endpoint, **kwargs)
+
+    async def put(self, endpoint: str, **kwargs: Any) -> Any:
+        return await self._request("PUT", endpoint, **kwargs)
+
+    async def delete(self, endpoint: str, **kwargs: Any) -> Any:
+        return await self._request("DELETE", endpoint, **kwargs)
+
+    async def patch(self, endpoint: str, **kwargs: Any) -> Any:
+        return await self._request("PATCH", endpoint, **kwargs)
