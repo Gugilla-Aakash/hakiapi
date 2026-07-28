@@ -28,3 +28,17 @@ class AsyncBaseAPIClient:
 
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         await self.close()
+
+    async def _request(
+        self,
+        method: str,
+        endpoint: str,
+        **kwargs: Any,
+    ) -> Any:
+        response = await self.client.request(
+            method=method,
+            url=endpoint.lstrip("/"),
+            **kwargs,
+        )
+
+        return response.json()
