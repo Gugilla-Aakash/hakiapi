@@ -26,6 +26,7 @@ class GitHubClient(BaseAPIClient):
         )
 
     # REST API: Profiles & Repositories
+
     def get_user(self, username: str, **kwargs: Any) -> dict[str, Any]:
         """Fetch a GitHub user's profile."""
         return self.get(f"users/{username}", **kwargs)
@@ -126,7 +127,49 @@ class GitHubClient(BaseAPIClient):
             },
         }
 
-    # GraphQL Engine
+    # REST API: README Existence Check
+
+    def check_readme_exists(self, owner: str, repo_name: str, **kwargs: Any) -> bool:
+        """
+        Check if a repository has a README using GitHub's canonical README REST endpoint.
+        Returns True if HTTP 200, False if HTTP 404 or error.
+        """
+        try:
+            response = self._request(
+                "HEAD",
+                f"repos/{owner}/{repo_name}/readme",
+                raw_response=True,
+                timeout=kwargs.pop("timeout", 5.0),
+                **kwargs,
+            )
+            return response.status_code == 200
+        except Exception:
+            return False
+
+    def check_top_repos_readmes(
+        self, owner: str, repos: list[dict[str, Any]], top_n: int = 5, **kwargs: Any
+    ) -> dict[str, bool]:
+        """
+        Check README presence for the top N owned (non-forked) repos sorted by stars.
+        Returns a dict mapping repo_name -> has_readme (bool).
+        """
+        owned_repos = [r for r in repos if not r.get("fork", False)]
+        top_repos = sorted(
+            owned_repos,
+            key=lambda r: r.get("stargazers_count", 0),
+            reverse=True,
+        )[:top_n]
+
+        results = {}
+        for r in top_repos:
+            repo_name = r.get("name")
+            if repo_name:
+                results[repo_name] = self.check_readme_exists(
+                    owner, repo_name, **kwargs
+                )
+        return results
+
+    # GraphQL Engine & Advanced Profile Fetching
 
     def execute_graphql(
         self, query: str, variables: dict[str, Any] | None = None, **kwargs: Any
@@ -159,7 +202,8 @@ class GitHubClient(BaseAPIClient):
         **kwargs: Any,
     ) -> dict[str, Any]:
         """
-        Fetches contribution count and calendar data via GraphQL.
+        Fetch 365-day contribution calendar (including weekly breakdown)
+        and lifetime PR/issue counts via GraphQL.
         Note: from_date and to_date must be ISO 8601 strings (e.g. '2023-01-01T00:00:00Z').
         """
         query = """
@@ -168,10 +212,35 @@ class GitHubClient(BaseAPIClient):
                 contributionsCollection(from: $from, to: $to) {
                     contributionCalendar {
                         totalContributions
+                        weeks {
+                            contributionDays {
+                                contributionCount
+                                date
+                            }
+                        }
                     }
-                    totalCommitContributions
-                    totalIssueContributions
-                    totalPullRequestContributions
+                }
+                pullRequests(first: 5, orderBy: {field: CREATED_AT, direction: DESC}) {
+                    totalCount
+                    nodes {
+                        title
+                        url
+                        createdAt
+                        repository {
+                            name
+                        }
+                    }
+                }
+                issues(first: 5, orderBy: {field: CREATED_AT, direction: DESC}) {
+                    totalCount
+                    nodes {
+                        title
+                        url
+                        createdAt
+                        repository {
+                            name
+                        }
+                    }
                 }
             }
         }
@@ -182,4 +251,72 @@ class GitHubClient(BaseAPIClient):
         if to_date:
             variables["to"] = to_date
 
-        return self.execute_graphql(query, variables=variables, **kwargs)
+        data = self.execute_graphql(query, variables=variables, **kwargs)
+        user_data = data.get("user")
+        if not user_data:
+            return {}
+
+        calendar = user_data.get("contributionsCollection", {}).get(
+            "contributionCalendar", {}
+        )
+        prs = user_data.get("pullRequests", {})
+        issues = user_data.get("issues", {})
+
+        return {
+            "recent_contributions_365_days": {
+                "total_contributions": calendar.get("totalContributions", 0),
+                "weeks": calendar.get("weeks", []),
+            },
+            "lifetime_activity": {
+                "pull_requests": {
+                    "total_count": prs.get("totalCount", 0),
+                    "recent_items": prs.get("nodes", []),
+                },
+                "issues": {
+                    "total_count": issues.get("totalCount", 0),
+                    "recent_items": issues.get("nodes", []),
+                },
+            },
+        }
+
+    def fetch_full_profile_data(self, username: str, **kwargs: Any) -> dict[str, Any]:
+        """Fetch and aggregate all profile data from GraphQL and REST API."""
+        contrib_data = self.get_user_contributions(username, **kwargs)
+
+        # Fetch up to 100 recent updated repositories via REST
+        repos = self.get_user_repos(
+            username, params={"per_page": 100, "sort": "updated"}, **kwargs
+        )
+
+        # Build language breakdown
+        lang_breakdown: dict[str, int] = {}
+        for r in repos:
+            lang = r.get("language")
+            if lang:
+                lang_breakdown[lang] = lang_breakdown.get(lang, 0) + 1
+
+        # Check README presence for top 5 owned repos
+        readme_statuses = self.check_top_repos_readmes(
+            username, repos, top_n=5, **kwargs
+        )
+
+        # Attach has_readme flag directly onto repository objects
+        for r in repos:
+            r_name = r.get("name")
+            if r_name in readme_statuses:
+                r["has_readme"] = readme_statuses[r_name]
+            else:
+                r["has_readme"] = None  # Not checked (outside top N)
+
+        return {
+            "username": username,
+            "repositories": {
+                "items": repos,
+                "language_breakdown": lang_breakdown,
+            },
+            "recent_contributions_365_days": contrib_data.get(
+                "recent_contributions_365_days", {}
+            ),
+            "lifetime_activity": contrib_data.get("lifetime_activity", {}),
+            "readme_statuses": readme_statuses,
+        }
