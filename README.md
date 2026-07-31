@@ -4,18 +4,19 @@
 
 ### Build production-grade Python API SDKs — not boilerplate.
 
-Authentication · OAuth 2.0 · Retries · Pagination · Typed Exceptions
+Authentication · OAuth 2.0 · Retries · Pagination · Typed Exceptions · Sync + Async
 
 [![PyPI](https://img.shields.io/pypi/v/hakiapi?style=for-the-badge)](https://pypi.org/project/hakiapi/)
 [![Python](https://img.shields.io/pypi/pyversions/hakiapi?style=for-the-badge)](https://pypi.org/project/hakiapi/)
 [![License](https://img.shields.io/github/license/Gugilla-Aakash/hakiapi?style=for-the-badge)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-300_passing-success?style=for-the-badge)](#testing)
 [![Typing](https://img.shields.io/badge/typing-fully_typed-blue?style=for-the-badge)](#features)
+[![Async](https://img.shields.io/badge/async-httpx_powered-9cf?style=for-the-badge)](#async-client-core-async_base_clientpy)
 [![Downloads](https://img.shields.io/pypi/dm/hakiapi?style=for-the-badge)](https://pypistats.org/packages/hakiapi)
 
 **Stop rewriting authentication, retries, and pagination for every API client you build.**
 
-[Installation](#installation) • [Quick Start](#quick-start) • [Features](#features) • [Core Concepts](#core-concepts) • [Bundled Clients](#bundled-clients) • [Create Your Own Client](#create-your-own-client) • [Architecture](#architecture--project-structure) • [Roadmap](#roadmap)
+[Installation](#installation) • [Quick Start](#quick-start) • [Features](#features) • [Core Concepts](#core-concepts) • [Async Client](#async-client-core-async_base_clientpy) • [Bundled Clients](#bundled-clients) • [Create Your Own Client](#create-your-own-client) • [Architecture](#architecture--project-structure) • [Roadmap](#roadmap)
 
 </div>
 
@@ -37,6 +38,7 @@ HakiAPI extracts all of that into one reusable core (`BaseAPIClient`), so every 
 | **Static Auth** | Reimplement Bearer/HMAC/API-key headers per project | 5 reusable `AuthBase` strategies, drop-in |
 | **Error Handling** | Manually branch on `response.status_code` everywhere | Raised as a typed, catchable exception hierarchy carrying `status_code` and the original `response` |
 | **Pagination** | Write a custom `while` loop per API's pagination style | `paginate()` auto-detects Link-header, `data`/`meta.next_token`, `messages`/`nextPageToken`, and `items`/`nextPageToken` styles, yielding lazily |
+| **Async I/O** | Swap in `aiohttp`/`httpx` yourself and reimplement retries, timeouts, and status handling on top of it | `AsyncBaseAPIClient` is an `httpx`-backed mirror of `BaseAPIClient` — same retry engine, same typed exceptions, `async`/`await` throughout |
 
 ---
 
@@ -51,6 +53,7 @@ HakiAPI extracts all of that into one reusable core (`BaseAPIClient`), so every 
 | 🔁 **Automatic Retries** | `create_retry_adapter()` mounts an `HTTPAdapter` with exponential backoff on `429/500/502/503/504` onto every `BaseAPIClient` session, deferring status handling to HakiAPI's own exceptions via `raise_on_status=False`. |
 | 📄 **Smart Pagination** | `paginate()` auto-detects GitHub-style `Link` headers, Twitter-style `meta.next_token`, Gmail-style `messages` + `nextPageToken`, and Calendar-style `items` + `nextPageToken` — all as one lazy generator. |
 | ⚠️ **Typed Exceptions** | `RateLimitError` (with `retry_after`), `AuthenticationError` (401/403), `ClientError` (4xx), `ServerError` (5xx), `RequestTimeoutError` — all inherit from `HakiAPIError`, which carries `status_code` and the original `response`. |
+| ⚡ **Async Client** | `AsyncBaseAPIClient` is a fully `async`/`await`, `httpx`-powered counterpart to `BaseAPIClient` — same exponential backoff on `429/500/502/503/504`, the same typed exception hierarchy, `Retry-After` clamping, SSRF-safe URL/endpoint validation, and a max-response-size guard, so you don't lose any safety behavior by going async. |
 | 📦 **Ready-to-use Clients** | `GitHubClient` (REST + GraphQL), `GmailClient`, `GoogleCalendarClient` — out of the box. |
 
 ---
@@ -62,6 +65,12 @@ pip install hakiapi
 ```
 
 Requires **Python 3.10+**. Core dependencies are `requests>=2.32.0` and `urllib3>=1.26.0`.
+
+`AsyncBaseAPIClient` is built on [`httpx`](https://www.python-httpx.org/), which isn't installed by default — add it if you want the async client:
+
+```bash
+pip install httpx
+```
 
 ---
 
@@ -115,6 +124,22 @@ with GitHubClient() as github:
         print(repo["name"])
 ```
 
+### 3. Async Requests (`httpx`-based)
+
+`AsyncBaseAPIClient` mirrors `BaseAPIClient` method-for-method, just with `async`/`await`:
+
+```python
+import asyncio
+from hakiapi.core.async_base_client import AsyncBaseAPIClient
+
+async def main():
+    async with AsyncBaseAPIClient(base_url="https://api.github.com") as client:
+        user = await client.get("/users/torvalds")
+        print(user["name"])
+
+asyncio.run(main())
+```
+
 ---
 
 ## Core Concepts
@@ -166,6 +191,34 @@ from hakiapi.core.auth import BearerTokenAuth, HeaderApiKeyAuth, QueryApiKeyAuth
 - Retries on `429, 500, 502, 503, 504` by default (configurable via `status_forcelist`).
 - `raise_on_status=False` — `urllib3` never raises on its own; HakiAPI's typed exceptions handle the final failure.
 - Mounted on both `http://` and `https://` for every `BaseAPIClient` session automatically.
+
+### Async Client (`core/async_base_client.py`)
+
+`AsyncBaseAPIClient` is a ground-up, `httpx`-backed rewrite of `BaseAPIClient` for `asyncio` codebases — it is not a thin wrapper around the sync client. It re-implements the same guarantees natively on top of `httpx.AsyncClient` instead of `requests`:
+
+```python
+from hakiapi.core.async_base_client import AsyncBaseAPIClient
+
+async with AsyncBaseAPIClient(
+    base_url="https://api.example.com",
+    timeout=10.0,
+    max_retries=3,
+    backoff_factor=0.5,
+    max_response_bytes=10 * 1024 * 1024,
+) as client:
+    data = await client.get("/resource")
+    created = await client.post("/resource", json={"name": "haki"})
+```
+
+- **Same retry engine, no `HTTPAdapter`.** Because `httpx` doesn't support mounting a `urllib3`-style adapter, retries are implemented directly in `_request()`: exponential backoff (`backoff_factor * 2**attempt` plus jitter) on `429/500/502/503/504`, and on `httpx.TimeoutException` / `httpx.RequestError` for network-level failures — up to `max_retries` attempts.
+- **`Retry-After`-aware.** A `429` with a valid `Retry-After` header sleeps for exactly that long (clamped to 300s) instead of the backoff curve.
+- **Same typed exception hierarchy.** `RateLimitError`, `AuthenticationError`, `ClientError`, `ServerError`, and `RequestTimeoutError` are raised from the exact same `hakiapi.core.exceptions` module the sync client uses — one `except` block works for both.
+- **Same security posture.** `base_url` is validated to be `http(s)` with a real host at construction time; every `endpoint` passed to `get`/`post`/etc. is rejected if it's absolute or protocol-relative (blocks SSRF via a malicious or templated endpoint string); redirects are **not** followed automatically (`follow_redirects=False`).
+- **Response-size guard.** Responses larger than `max_response_bytes` raise `HakiAPIError` before the body is handed back to you, checked against `Content-Length` when present.
+- **Async context manager.** `async with AsyncBaseAPIClient(...) as client:` calls `client.close()` (which awaits `httpx.AsyncClient.aclose()`) on exit; `close()` is idempotent, so calling it more than once is safe.
+- **`get`, `post`, `put`, `delete`, `patch`** all `await` through the same `_request()` pipeline as the sync client, and all accept `raw_response=True` to get the `httpx.Response` back instead of the parsed body.
+
+> **Note:** `AsyncBaseAPIClient` currently lives in `hakiapi.core.async_base_client` as a standalone import — it isn't re-exported from the top-level `hakiapi` package yet, so import it directly as shown above.
 
 ### Smart Pagination (`core/paginator.py`)
 
@@ -318,6 +371,7 @@ hakiapi/
 │   ├── retry.py                # create_retry_adapter() — exponential-backoff HTTPAdapter factory
 │   ├── paginator.py            # paginate() — Link-header + token-based pagination
 │   ├── base_client.py          # BaseAPIClient — session, retries, exception mapping
+│   ├── async_base_client.py    # AsyncBaseAPIClient — httpx-based async counterpart
 │   └── exceptions.py           # HakiAPIError hierarchy
 │
 └── clients/
@@ -347,7 +401,8 @@ pytest
 ```
 
 * ✅ **300 tests passing**
-* ✅ Core framework covered: `auth`, `retry`, `paginator`, `base_client`, `exceptions`
+* ✅ Core framework covered: `auth`, `retry`, `paginator`, `base_client`, `async_base_client`, `exceptions`
+* ✅ `AsyncBaseAPIClient` covered end-to-end via `httpx.MockTransport` — success paths, retry/backoff, `Retry-After` handling, timeouts, SSRF/endpoint validation, response-size limits, and context-manager lifecycle
 * ✅ Full OAuth 2.0 engine covered: `google.py` (interactive flow) and `refresh.py` (silent refresh), fully mocked
 * ✅ `FileTokenStore` atomic-write behavior covered
 * ✅ `GitHubClient`, `GmailClient`, `GoogleCalendarClient` covered
@@ -366,13 +421,15 @@ pytest
 * [x] Interactive Google OAuth 2.0 flow (local redirect interceptor, CSRF-protected)
 * [x] Atomic `FileTokenStore` and standalone silent-refresh routine
 * [x] `GitHubClient`, `GmailClient`, `GoogleCalendarClient`
+* [x] Async client (`AsyncBaseAPIClient`, `httpx`-based)
 
 **Planned**
 
 * [ ] Stripe client
 * [ ] Twitter/X client
 * [ ] Wire automatic silent refresh into `GoogleOAuthFlow.get_token()`
-* [ ] Async client (`httpx`-based)
+* [ ] Async versions of `GitHubClient` / `GmailClient` / `GoogleCalendarClient` on top of `AsyncBaseAPIClient`
+* [ ] Top-level `hakiapi` export for `AsyncBaseAPIClient`
 * [ ] Plugin system
 
 ---
