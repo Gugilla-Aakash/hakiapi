@@ -49,7 +49,10 @@ class CircuitBreaker:
     def state(self) -> CircuitState:
         with self._lock:
             if self._state == CircuitState.OPEN:
-                if time.monotonic() - self._last_failure_time >= self.recovery_timeout:
+                if (
+                    time.monotonic() - self._last_failure_time
+                    >= self.recovery_timeout
+                ):
                     self._state = CircuitState.HALF_OPEN
 
             return self._state
@@ -59,8 +62,9 @@ class CircuitBreaker:
             current_state = self.state
 
             if current_state == CircuitState.OPEN:
-                remaining = self.recovery_timeout - (
-                    time.monotonic() - self._last_failure_time
+                remaining = (
+                    self.recovery_timeout
+                    - (time.monotonic() - self._last_failure_time)
                 )
 
                 raise CircuitOpenError(
@@ -80,7 +84,13 @@ class CircuitBreaker:
         return wrapper
 
     def _on_success(self) -> None:
-        pass
+        with self._lock:
+            if self._state == CircuitState.HALF_OPEN:
+                self._state = CircuitState.CLOSED
+                self._failure_count = 0
+
+            elif self._state == CircuitState.CLOSED:
+                self._failure_count = 0
 
     def _on_failure(self) -> None:
         pass
