@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import time
 import threading
 from enum import Enum
-from typing import Any
-import time
+from typing import Any, Callable, TypeVar
+
 from .exceptions import HakiAPIError
+
+T = TypeVar("T")
 
 
 class CircuitState(Enum):
@@ -14,6 +17,8 @@ class CircuitState(Enum):
 
 
 class CircuitOpenError(HakiAPIError):
+    """Raised when requests are blocked because the circuit is OPEN."""
+
     def __init__(
         self,
         message: str = "Circuit breaker is OPEN.",
@@ -48,3 +53,34 @@ class CircuitBreaker:
                     self._state = CircuitState.HALF_OPEN
 
             return self._state
+
+    def __call__(self, func: Callable[..., T]) -> Callable[..., T]:
+        def wrapper(*args: Any, **kwargs: Any) -> T:
+            current_state = self.state
+
+            if current_state == CircuitState.OPEN:
+                remaining = self.recovery_timeout - (
+                    time.monotonic() - self._last_failure_time
+                )
+
+                raise CircuitOpenError(
+                    message=f"Circuit is OPEN. Fast-failing request for {func.__name__}.",
+                    retry_after=max(0.0, remaining),
+                )
+
+            try:
+                result = func(*args, **kwargs)
+                self._on_success()
+                return result
+
+            except self.expected_exceptions:
+                self._on_failure()
+                raise
+
+        return wrapper
+
+    def _on_success(self) -> None:
+        pass
+
+    def _on_failure(self) -> None:
+        pass
