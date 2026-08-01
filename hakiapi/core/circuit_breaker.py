@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 from enum import Enum
 from typing import Any
-
+import time
 from .exceptions import HakiAPIError
 
 
@@ -39,3 +39,12 @@ class CircuitBreaker:
         self._failure_count = 0
         self._last_failure_time = 0.0
         self._lock = threading.Lock()
+
+    @property
+    def state(self) -> CircuitState:
+        with self._lock:
+            if self._state == CircuitState.OPEN:
+                if time.monotonic() - self._last_failure_time >= self.recovery_timeout:
+                    self._state = CircuitState.HALF_OPEN
+
+            return self._state
