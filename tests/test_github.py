@@ -492,12 +492,13 @@ def test_execute_graphql_forwards_kwargs() -> None:
 def test_get_user_contributions_calls_execute_graphql() -> None:
     gh = _build_client()
 
-    expected = {"user": {"contributionsCollection": {}}}
+    # The mock still returns the raw GraphQL structure
+    mock_graphql_response = {"user": {"contributionsCollection": {}}}
 
     with patch.object(
         gh,
         "execute_graphql",
-        return_value=expected,
+        return_value=mock_graphql_response,
     ) as mock_exec:
         result = gh.get_user_contributions("octocat")
 
@@ -506,7 +507,15 @@ def test_get_user_contributions_calls_execute_graphql() -> None:
 
     assert "contributionsCollection" in query
     assert variables == {"login": "octocat"}
-    assert result == expected
+
+    # Update the assertion to match the parsed dictionary structure
+    assert result == {
+        "recent_contributions_365_days": {"total_contributions": 0, "weeks": []},
+        "lifetime_activity": {
+            "pull_requests": {"total_count": 0, "recent_items": []},
+            "issues": {"total_count": 0, "recent_items": []},
+        },
+    }
 
 
 def test_get_user_contributions_includes_date_filters() -> None:
