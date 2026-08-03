@@ -4,19 +4,20 @@
 
 ### Build production-grade Python API SDKs — not boilerplate.
 
-Authentication · OAuth 2.0 · Retries · Pagination · Typed Exceptions · Sync + Async
+Authentication · OAuth 2.0 · Retries · Circuit Breaker · Pagination · Typed Exceptions · Sync + Async
 
 [![PyPI](https://img.shields.io/pypi/v/hakiapi?style=for-the-badge)](https://pypi.org/project/hakiapi/)
 [![Python](https://img.shields.io/pypi/pyversions/hakiapi?style=for-the-badge)](https://pypi.org/project/hakiapi/)
 [![License](https://img.shields.io/github/license/Gugilla-Aakash/hakiapi?style=for-the-badge)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-300_passing-success?style=for-the-badge)](#testing)
+[![Tests](https://img.shields.io/badge/tests-347_passing-success?style=for-the-badge)](#testing)
 [![Typing](https://img.shields.io/badge/typing-fully_typed-blue?style=for-the-badge)](#features)
 [![Async](https://img.shields.io/badge/async-httpx_powered-9cf?style=for-the-badge)](#async-client-core-async_base_clientpy)
+[![Resilience](https://img.shields.io/badge/resilience-circuit_breaker-orange?style=for-the-badge)](#circuit-breaker-core-circuit_breakerpy)
 [![Downloads](https://img.shields.io/pypi/dm/hakiapi?style=for-the-badge)](https://pypistats.org/packages/hakiapi)
 
 **Stop rewriting authentication, retries, and pagination for every API client you build.**
 
-[Installation](#installation) • [Quick Start](#quick-start) • [Features](#features) • [Core Concepts](#core-concepts) • [Async Client](#async-client-core-async_base_clientpy) • [Bundled Clients](#bundled-clients) • [Create Your Own Client](#create-your-own-client) • [Architecture](#architecture--project-structure) • [Roadmap](#roadmap)
+[Installation](#installation) • [Quick Start](#quick-start) • [Features](#features) • [Core Concepts](#core-concepts) • [Circuit Breaker](#circuit-breaker-core-circuit_breakerpy) • [Async Client](#async-client-core-async_base_clientpy) • [Bundled Clients](#bundled-clients) • [Create Your Own Client](#create-your-own-client) • [Architecture](#architecture--project-structure) • [Roadmap](#roadmap)
 
 </div>
 
@@ -39,6 +40,7 @@ HakiAPI extracts all of that into one reusable core (`BaseAPIClient`), so every 
 | **Error Handling** | Manually branch on `response.status_code` everywhere | Raised as a typed, catchable exception hierarchy carrying `status_code` and the original `response` |
 | **Pagination** | Write a custom `while` loop per API's pagination style | `paginate()` auto-detects Link-header, `data`/`meta.next_token`, `messages`/`nextPageToken`, and `items`/`nextPageToken` styles, yielding lazily |
 | **Async I/O** | Swap in `aiohttp`/`httpx` yourself and reimplement retries, timeouts, and status handling on top of it | `AsyncBaseAPIClient` is an `httpx`-backed mirror of `BaseAPIClient` — same retry engine, same typed exceptions, `async`/`await` throughout |
+| **Cascading Failures** | A struggling downstream service keeps getting hammered by retries until your own app falls over with it | `CircuitBreaker` decorator trips OPEN after N consecutive failures, fails fast with `CircuitOpenError` during cooldown, then auto-probes recovery with a single trial call |
 
 ---
 
@@ -54,6 +56,7 @@ HakiAPI extracts all of that into one reusable core (`BaseAPIClient`), so every 
 | 📄 **Smart Pagination** | `paginate()` auto-detects GitHub-style `Link` headers, Twitter-style `meta.next_token`, Gmail-style `messages` + `nextPageToken`, and Calendar-style `items` + `nextPageToken` — all as one lazy generator. |
 | ⚠️ **Typed Exceptions** | `RateLimitError` (with `retry_after`), `AuthenticationError` (401/403), `ClientError` (4xx), `ServerError` (5xx), `RequestTimeoutError` — all inherit from `HakiAPIError`, which carries `status_code` and the original `response`. |
 | ⚡ **Async Client** | `AsyncBaseAPIClient` is a fully `async`/`await`, `httpx`-powered counterpart to `BaseAPIClient` — same exponential backoff on `429/500/502/503/504`, the same typed exception hierarchy, `Retry-After` clamping, SSRF-safe URL/endpoint validation, and a max-response-size guard, so you don't lose any safety behavior by going async. |
+| 🧯 **Circuit Breaker** | Thread-safe `CircuitBreaker` decorator implementing the classic `CLOSED → OPEN → HALF_OPEN` state machine. Fails fast with `CircuitOpenError` (carrying a `retry_after` cooldown) once `failure_threshold` consecutive failures are hit, then automatically allows a single trial request through after `recovery_timeout` seconds to probe for recovery. |
 | 📦 **Ready-to-use Clients** | `GitHubClient` (REST + GraphQL), `GmailClient`, `GoogleCalendarClient` — out of the box. |
 
 ---
@@ -191,6 +194,46 @@ from hakiapi.core.auth import BearerTokenAuth, HeaderApiKeyAuth, QueryApiKeyAuth
 - Retries on `429, 500, 502, 503, 504` by default (configurable via `status_forcelist`).
 - `raise_on_status=False` — `urllib3` never raises on its own; HakiAPI's typed exceptions handle the final failure.
 - Mounted on both `http://` and `https://` for every `BaseAPIClient` session automatically.
+
+### Circuit Breaker (`core/circuit_breaker.py`)
+
+`CircuitBreaker` protects downstream services from cascading failures and stops a struggling API from being hammered by an ever-growing pile of retries. It's a thread-safe decorator you can drop onto any synchronous callable:
+
+```python
+from hakiapi.core.circuit_breaker import CircuitBreaker, CircuitOpenError
+from hakiapi.core.exceptions import HakiAPIError
+
+breaker = CircuitBreaker(
+    failure_threshold=5,      # consecutive failures before the circuit opens
+    recovery_timeout=30.0,    # seconds to wait before allowing a trial request
+    expected_exceptions=(HakiAPIError,),  # exception types that count as failures
+)
+
+@breaker
+def get_user(user_id: str):
+    return github.get_user(user_id)
+
+try:
+    get_user("torvalds")
+except CircuitOpenError as e:
+    print(f"Downstream is unhealthy — retry in {e.retry_after:.1f}s")
+```
+
+It implements the classic three-state machine:
+
+| State | Behavior |
+|---|---|
+| **`CLOSED`** | Normal operation. Requests pass through; a successful call resets the failure counter. |
+| **`OPEN`** | Failing fast. Every call is blocked instantly with `CircuitOpenError` (no call is made to the wrapped function) until `recovery_timeout` seconds have elapsed. |
+| **`HALF_OPEN`** | Testing recovery. Once the timeout elapses, a single trial request is allowed through — success closes the circuit and resets the counter, failure reopens it immediately and restarts the cooldown. |
+
+- **Thread-safe.** All state transitions and counters are guarded by a single `threading.Lock`, so one `CircuitBreaker` instance can safely protect a callable shared across threads.
+- **Lazy state evaluation.** The `OPEN → HALF_OPEN` transition happens the moment `state` is read (or a wrapped call is made) after `recovery_timeout` has elapsed — there's no background timer or polling thread.
+- **`CircuitOpenError`** inherits from `HakiAPIError` and carries `retry_after` (seconds remaining in the cooldown, clamped to `>= 0`), so callers can back off intelligently instead of guessing.
+- **Configurable failure scope.** `expected_exceptions` controls which exception types trip the breaker — defaults to `HakiAPIError`, so unrelated exceptions (e.g. a `ValueError` from bad input) pass straight through without affecting circuit state.
+- **Self-clamping configuration.** `failure_threshold` is floored at `1` and `recovery_timeout` at `0.1` seconds, so a misconfigured `0` or negative value can't accidentally create a circuit that never opens or reopens instantly forever.
+
+> **Note:** `CircuitBreaker` is currently a standalone utility — import it directly from `hakiapi.core.circuit_breaker` and wrap it around any client method (sync `BaseAPIClient` calls, a bundled client's methods, or your own functions) where you want fail-fast protection against a struggling dependency.
 
 ### Async Client (`core/async_base_client.py`)
 
@@ -369,6 +412,7 @@ hakiapi/
 │   │   └── token_store.py    # OAuthToken, TokenStore (ABC), FileTokenStore
 │   ├── auth.py                # BearerTokenAuth, HeaderApiKeyAuth, QueryApiKeyAuth, HmacAuth, OAuth2Auth
 │   ├── retry.py                # create_retry_adapter() — exponential-backoff HTTPAdapter factory
+│   ├── circuit_breaker.py      # CircuitBreaker — CLOSED/OPEN/HALF_OPEN fail-fast decorator
 │   ├── paginator.py            # paginate() — Link-header + token-based pagination
 │   ├── base_client.py          # BaseAPIClient — session, retries, exception mapping
 │   ├── async_base_client.py    # AsyncBaseAPIClient — httpx-based async counterpart
@@ -400,9 +444,10 @@ pip install hakiapi[dev]
 pytest
 ```
 
-* ✅ **300 tests passing**
-* ✅ Core framework covered: `auth`, `retry`, `paginator`, `base_client`, `async_base_client`, `exceptions`
+* ✅ **340+ tests passing**
+* ✅ Core framework covered: `auth`, `retry`, `circuit_breaker`, `paginator`, `base_client`, `async_base_client`, `exceptions`
 * ✅ `AsyncBaseAPIClient` covered end-to-end via `httpx.MockTransport` — success paths, retry/backoff, `Retry-After` handling, timeouts, SSRF/endpoint validation, response-size limits, and context-manager lifecycle
+* ✅ `CircuitBreaker` covered end-to-end — state transitions (`CLOSED → OPEN → HALF_OPEN`), threshold clamping, `retry_after` calculation, success-resets-counter behavior, and unexpected-exception passthrough, with `time.monotonic` mocked for deterministic timing
 * ✅ Full OAuth 2.0 engine covered: `google.py` (interactive flow) and `refresh.py` (silent refresh), fully mocked
 * ✅ `FileTokenStore` atomic-write behavior covered
 * ✅ `GitHubClient`, `GmailClient`, `GoogleCalendarClient` covered
@@ -422,6 +467,7 @@ pytest
 * [x] Atomic `FileTokenStore` and standalone silent-refresh routine
 * [x] `GitHubClient`, `GmailClient`, `GoogleCalendarClient`
 * [x] Async client (`AsyncBaseAPIClient`, `httpx`-based)
+* [x] Circuit breaker (`CircuitBreaker`) for fail-fast protection against cascading failures
 
 **Planned**
 
