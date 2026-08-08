@@ -14,10 +14,13 @@ Authentication · OAuth 2.0 · Retries · Circuit Breaker · Pagination · Typed
 [![Async](https://img.shields.io/badge/async-httpx_powered-9cf?style=for-the-badge)](#async-client-core-async_base_clientpy)
 [![Resilience](https://img.shields.io/badge/resilience-circuit_breaker-orange?style=for-the-badge)](#circuit-breaker-core-circuit_breakerpy)
 [![Downloads](https://img.shields.io/pypi/dm/hakiapi?style=for-the-badge)](https://pypistats.org/packages/hakiapi)
+[![Docs](https://img.shields.io/badge/docs-live-brightgreen?style=for-the-badge)](https://hakiapi-docs.hakiapi.workers.dev/docs/auth)
 
 **Stop rewriting authentication, retries, and pagination for every API client you build.**
 
-[Installation](#installation) • [Quick Start](#quick-start) • [Features](#features) • [Core Concepts](#core-concepts) • [Circuit Breaker](#circuit-breaker-core-circuit_breakerpy) • [Async Client](#async-client-core-async_base_clientpy) • [Bundled Clients](#bundled-clients) • [Create Your Own Client](#create-your-own-client) • [Architecture](#architecture--project-structure) • [Roadmap](#roadmap)
+📖 **[Read the full documentation →](https://hakiapi-docs.hakiapi.workers.dev/docs/)**
+
+[Docs](https://hakiapi-docs.hakiapi.workers.dev/docs/) • [Installation](#installation) • [Quick Start](#quick-start) • [Features](#features) • [Core Concepts](#core-concepts) • [Circuit Breaker](#circuit-breaker-core-circuit_breakerpy) • [Async Client](#async-client-core-async_base_clientpy) • [Bundled Clients](#bundled-clients) • [Create Your Own Client](#create-your-own-client) • [Architecture](#architecture--project-structure) • [Roadmap](#roadmap)
 
 </div>
 
@@ -74,6 +77,8 @@ Requires **Python 3.10+**. Core dependencies are `requests>=2.32.0` and `urllib3
 ```bash
 pip install httpx
 ```
+
+📖 Full API reference and guides: **[hakiapi-docs.hakiapi.workers.dev](https://hakiapi-docs.hakiapi.workers.dev/docs/installation)**
 
 ---
 
@@ -495,5 +500,7 @@ MIT License — see [LICENSE](LICENSE) for details.
 ### ⭐ If HakiAPI saved you from rewriting the same API client for the tenth time, consider giving it a star.
 
 It helps more developers discover the project and motivates future development.
+
+📖 [Documentation](https://hakiapi-docs.hakiapi.workers.dev/docs/) · 🐛 [Report an Issue](../../issues) · 🤝 [Contribute](#contributing)
 
 Built with ❤️ by **Gugilla Aakash**
