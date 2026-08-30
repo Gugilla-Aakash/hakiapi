@@ -1,11 +1,12 @@
 import hashlib
 import hmac
 import time
-import requests
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
-from requests.auth import AuthBase
+
+import requests
 from requests import PreparedRequest
+from requests.auth import AuthBase
 
 
 class OAuth2Auth(AuthBase):

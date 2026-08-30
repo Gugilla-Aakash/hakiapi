@@ -1,16 +1,18 @@
-import requests
 from typing import Any, TypeVar
-from requests.auth import AuthBase
 
-from .retry import create_retry_adapter
+import requests
+from requests.auth import AuthBase
+from typing_extensions import Self
+
 from .exceptions import (
-    HakiAPIError,
-    ClientError,
-    ServerError,
-    RateLimitError,
     AuthenticationError,
+    ClientError,
+    HakiAPIError,
+    RateLimitError,
     RequestTimeoutError,
+    ServerError,
 )
+from .retry import create_retry_adapter
 
 T = TypeVar("T", bound="BaseAPIClient")
 
@@ -37,7 +39,7 @@ class BaseAPIClient:
     def close(self) -> None:
         self.session.close()
 
-    def __enter__(self: T) -> T:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:

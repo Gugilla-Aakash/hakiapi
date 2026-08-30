@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import time
 import threading
+import time
+from collections.abc import Callable
 from enum import Enum
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar
 
 from .exceptions import HakiAPIError
 

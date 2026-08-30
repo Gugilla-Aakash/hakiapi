@@ -21,13 +21,11 @@ class HakiAPIError(Exception):
 class ClientError(HakiAPIError):
     """Raised when the API returns a 4xx status code."""
 
-    pass
 
 
 class ServerError(HakiAPIError):
     """Raised when the API returns a 5xx status code."""
 
-    pass
 
 
 class RateLimitError(ClientError):
@@ -36,7 +34,7 @@ class RateLimitError(ClientError):
     def __init__(
         self,
         message: str,
-        retry_after: int | float | None = None,
+        retry_after: float | None = None,
         status_code: int | None = 429,
         response: Any | None = None,
     ) -> None:

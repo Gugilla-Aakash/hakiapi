@@ -8,6 +8,7 @@ from typing import Any, TypeVar
 from urllib.parse import urlsplit
 
 import httpx
+from typing_extensions import Self
 
 from .exceptions import (
     AuthenticationError,
@@ -90,7 +91,7 @@ class AsyncBaseAPIClient:
         await self.client.aclose()
         self._closed = True
 
-    async def __aenter__(self: T) -> T:
+    async def __aenter__(self) -> Self:
         return self
 
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
