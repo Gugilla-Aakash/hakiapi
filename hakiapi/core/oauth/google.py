@@ -23,7 +23,6 @@ class OAuthFlowError(HakiAPIError):
     endpoint rejects the exchange.
     """
 
-    pass
 
 
 class _CallbackHandler(BaseHTTPRequestHandler):
@@ -36,7 +35,7 @@ class _CallbackHandler(BaseHTTPRequestHandler):
     makes it back out to `GoogleOAuthFlow`.
     """
 
-    def do_GET(self) -> None:  # noqa: N802 — required name for http.server
+    def do_GET(self) -> None:
         params = parse_qs(urlparse(self.path).query)
 
         self.server.oauth_result = {  # type: ignore[attr-defined]

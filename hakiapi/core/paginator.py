@@ -1,4 +1,5 @@
-from typing import Any, Iterator
+from collections.abc import Iterator
+from typing import Any
 from urllib.parse import parse_qsl, urlparse
 
 from .base_client import BaseAPIClient

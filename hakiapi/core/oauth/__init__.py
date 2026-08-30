@@ -3,9 +3,9 @@ from .refresh import refresh_access_token
 from .token_store import FileTokenStore, OAuthToken, TokenStore
 
 __all__ = [
+    "FileTokenStore",
     "GoogleOAuthFlow",
     "OAuthFlowError",
-    "FileTokenStore",
     "OAuthToken",
     "TokenStore",
     "refresh_access_token",
