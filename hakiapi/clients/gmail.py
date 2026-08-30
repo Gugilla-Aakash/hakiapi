@@ -1,7 +1,8 @@
-from typing import Any, Iterator, Optional
+from collections.abc import Iterator
+from typing import Any
 
-from ..core.base_client import BaseAPIClient
 from ..core import auth
+from ..core.base_client import BaseAPIClient
 from ..core.paginator import paginate
 
 
@@ -40,7 +41,7 @@ class GmailMessagesResource:
         return self._client.get(f"users/{user_id}/messages/{message_id}", **kwargs)
 
     def list(
-        self, user_id: str = "me", max_pages: Optional[int] = None, **kwargs: Any
+        self, user_id: str = "me", max_pages: int | None = None, **kwargs: Any
     ) -> Iterator[dict[str, Any]]:
         """Lazily yield messages using the central HakiAPI paginator."""
 
@@ -56,7 +57,7 @@ class GmailMessagesResource:
         self,
         query: str,
         user_id: str = "me",
-        max_pages: Optional[int] = None,
+        max_pages: int | None = None,
         **kwargs: Any,
     ) -> Iterator[dict[str, Any]]:
         """Search for messages using standard Gmail query syntax (e.g., 'is:unread')"""

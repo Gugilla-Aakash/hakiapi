@@ -1,8 +1,9 @@
 import datetime
-from typing import Any, Iterator, Optional
+from collections.abc import Iterator
+from typing import Any
 
-from ..core.base_client import BaseAPIClient
 from ..core import auth
+from ..core.base_client import BaseAPIClient
 from ..core.paginator import paginate
 
 
@@ -13,7 +14,7 @@ class CalendarsResource:
         self._client = client
 
     def list(
-        self, max_pages: Optional[int] = None, **kwargs: Any
+        self, max_pages: int | None = None, **kwargs: Any
     ) -> Iterator[dict[str, Any]]:
         """List all calendars on the user's calendar list."""
         return paginate(
@@ -39,7 +40,7 @@ class CalendarEventsResource:
     def list(
         self,
         calendar_id: str = "primary",
-        max_pages: Optional[int] = None,
+        max_pages: int | None = None,
         **kwargs: Any,
     ) -> Iterator[dict[str, Any]]:
         """Lazily yield all events from a calendar."""
