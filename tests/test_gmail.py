@@ -14,7 +14,6 @@ from hakiapi.clients.gmail import (
 )
 from hakiapi.core.auth import BearerTokenAuth
 
-
 # Fixtures
 
 

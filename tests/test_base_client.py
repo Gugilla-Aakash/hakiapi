@@ -2,9 +2,9 @@
 Test suite for base_client.py
 """
 
+import json as json_mod
 from typing import Any
 from unittest.mock import MagicMock, patch
-import json as json_mod
 
 import pytest
 import requests
@@ -13,12 +13,12 @@ from requests.adapters import HTTPAdapter
 from hakiapi.core import base_client
 from hakiapi.core.base_client import BaseAPIClient
 from hakiapi.core.exceptions import (
-    HakiAPIError,
-    ClientError,
-    ServerError,
-    RateLimitError,
     AuthenticationError,
+    ClientError,
+    HakiAPIError,
+    RateLimitError,
     RequestTimeoutError,
+    ServerError,
 )
 
 
@@ -107,9 +107,8 @@ class TestContextManagerAndClose:
 
     def test_exit_closes_even_on_exception(self, client: BaseAPIClient) -> None:
         client.close = MagicMock()  # type: ignore
-        with pytest.raises(ValueError):
-            with client:
-                raise ValueError("boom")
+        with pytest.raises(ValueError), client:
+            raise ValueError("boom")
         client.close.assert_called_once()
 
 

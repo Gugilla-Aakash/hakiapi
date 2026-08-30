@@ -14,15 +14,15 @@ These tests make sure that:
 """
 
 import pytest
-from hakiapi.core.exceptions import (
-    HakiAPIError,
-    ClientError,
-    ServerError,
-    RateLimitError,
-    AuthenticationError,
-    RequestTimeoutError,
-)
 
+from hakiapi.core.exceptions import (
+    AuthenticationError,
+    ClientError,
+    HakiAPIError,
+    RateLimitError,
+    RequestTimeoutError,
+    ServerError,
+)
 
 # __str__ formatting
 

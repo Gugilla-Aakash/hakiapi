@@ -13,8 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from hakiapi.core.oauth.token_store import OAuthToken, TokenStore, FileTokenStore
-
+from hakiapi.core.oauth.token_store import FileTokenStore, OAuthToken, TokenStore
 
 # OAuthToken - to_dict / from_dict
 

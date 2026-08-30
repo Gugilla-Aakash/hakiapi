@@ -2,9 +2,11 @@
 Tests for paginator.paginate().
 """
 
-from typing import Any, Optional
+from typing import Any
 from unittest.mock import MagicMock
+
 import pytest
+
 from hakiapi.core.paginator import paginate
 
 # Helpers
@@ -14,7 +16,7 @@ class FakeResponse:
     """Mimics the bits of requests.Response that paginate() touches."""
 
     def __init__(
-        self, json_data: Any, links: Optional[dict[str, dict[str, str]]] = None
+        self, json_data: Any, links: dict[str, dict[str, str]] | None = None
     ) -> None:
         self._json_data = json_data
         self.links = links or {}

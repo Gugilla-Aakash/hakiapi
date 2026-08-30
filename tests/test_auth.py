@@ -16,10 +16,9 @@ from requests import PreparedRequest, Request
 from hakiapi.core.auth import (
     BearerTokenAuth,
     HeaderApiKeyAuth,
-    QueryApiKeyAuth,
     HmacAuth,
+    QueryApiKeyAuth,
 )
-
 
 # Helpers
 

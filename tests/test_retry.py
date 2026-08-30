@@ -17,7 +17,6 @@ from urllib3.util import Retry
 
 from hakiapi.core.retry import create_retry_adapter
 
-
 DEFAULT_STATUS_FORCELIST = [429, 500, 502, 503, 504]
 
 
