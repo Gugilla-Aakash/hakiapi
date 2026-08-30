@@ -4,6 +4,7 @@ Example usage of the HakiAPI Gmail Client with Resource-Based Routing.
 
 import os
 import sys
+
 from hakiapi import GmailClient, exceptions
 
 # 1. Fetch the token from the OS environment securely
