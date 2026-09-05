@@ -3,6 +3,7 @@ Test suite for base_client.py
 """
 
 import json as json_mod
+import time
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -20,6 +21,7 @@ from hakiapi.core.exceptions import (
     RequestTimeoutError,
     ServerError,
 )
+from hakiapi.core.circuit_breaker import CircuitBreaker, CircuitOpenError, CircuitState
 
 
 def make_response(
@@ -396,3 +398,118 @@ class TestRealRetryAdapterIntegration:
         assert adapter.max_retries.total == 3
         assert 429 in adapter.max_retries.status_forcelist
         assert adapter.max_retries.raise_on_status is False
+
+
+class TestCircuitBreakerIntegration:
+    def test_client_initializes_with_circuit_breaker(self) -> None:
+        c = BaseAPIClient(base_url="https://api.example.com")
+        assert c.circuit_breaker is not None
+        assert isinstance(c.circuit_breaker, CircuitBreaker)
+
+    def test_client_allows_disabling_circuit_breaker(self) -> None:
+        c = BaseAPIClient(
+            base_url="https://api.example.com", enable_circuit_breaker=False
+        )
+        assert c.circuit_breaker is None
+
+    def test_circuit_breaker_records_failure_on_5xx(
+        self, client: BaseAPIClient
+    ) -> None:
+        assert client.circuit_breaker is not None  # Type guard for Pyright
+        client.session.request = MagicMock(return_value=make_response(status_code=500))
+        assert client.circuit_breaker._failure_count == 0
+
+        with pytest.raises(ServerError):
+            client.get("users")
+
+        assert client.circuit_breaker._failure_count == 1
+
+    def test_circuit_breaker_records_failure_on_timeout(
+        self, client: BaseAPIClient
+    ) -> None:
+        assert client.circuit_breaker is not None
+        client.session.request = MagicMock(side_effect=requests.exceptions.Timeout())
+        assert client.circuit_breaker._failure_count == 0
+
+        with pytest.raises(RequestTimeoutError):
+            client.get("users")
+
+        assert client.circuit_breaker._failure_count == 1
+
+    def test_circuit_breaker_records_failure_on_request_exception(
+        self, client: BaseAPIClient
+    ) -> None:
+        assert client.circuit_breaker is not None
+        client.session.request = MagicMock(
+            side_effect=requests.exceptions.ConnectionError("network down")
+        )
+        assert client.circuit_breaker._failure_count == 0
+
+        with pytest.raises(HakiAPIError):
+            client.get("users")
+
+        assert client.circuit_breaker._failure_count == 1
+
+    def test_circuit_breaker_fast_fails_when_open(self, client: BaseAPIClient) -> None:
+        assert client.circuit_breaker is not None
+
+        # Manually force the circuit open AND set the failure time to now
+        # so the recovery timeout doesn't instantly switch it to HALF_OPEN
+        client.circuit_breaker._state = CircuitState.OPEN
+        client.circuit_breaker._last_failure_time = time.monotonic()
+
+        client.session.request = MagicMock()  # Should not be called
+
+        with pytest.raises(CircuitOpenError) as exc_info:
+            client.get("users")
+
+        # Verify network request was blocked
+        client.session.request.assert_not_called()
+        assert "Circuit breaker is OPEN" in exc_info.value.message
+
+    def test_circuit_breaker_resets_on_success(self, client: BaseAPIClient) -> None:
+        assert client.circuit_breaker is not None
+        # Manually force the circuit into HALF_OPEN with prior failures
+        client.circuit_breaker._state = CircuitState.HALF_OPEN
+        client.circuit_breaker._failure_count = 5
+
+        # Mock a successful network call
+        client.session.request = MagicMock(
+            return_value=make_response(status_code=200, json_data={"ok": True})
+        )
+
+        client.get("users")
+
+        # Verify circuit recovered fully
+        assert client.circuit_breaker.state == CircuitState.CLOSED
+        assert client.circuit_breaker._failure_count == 0
+
+    def test_circuit_breaker_treats_4xx_as_success(self, client: BaseAPIClient) -> None:
+        assert client.circuit_breaker is not None
+        # 4xx errors mean the server is ALIVE and responding, so it should reset the circuit
+        client.circuit_breaker._state = CircuitState.HALF_OPEN
+        client.circuit_breaker._failure_count = 5
+
+        client.session.request = MagicMock(return_value=make_response(status_code=404))
+
+        with pytest.raises(ClientError):
+            client.get("users")
+
+        # Verify circuit recovered fully despite the 404
+        assert client.circuit_breaker.state == CircuitState.CLOSED
+        assert client.circuit_breaker._failure_count == 0
+
+    def test_circuit_breaker_treats_429_as_success(self, client: BaseAPIClient) -> None:
+        assert client.circuit_breaker is not None
+        # 429 means the server is actively rate-limiting us, but is not "down"
+        client.circuit_breaker._state = CircuitState.HALF_OPEN
+        client.circuit_breaker._failure_count = 5
+
+        client.session.request = MagicMock(return_value=make_response(status_code=429))
+
+        with pytest.raises(RateLimitError):
+            client.get("users")
+
+        # Verify circuit recovered fully
+        assert client.circuit_breaker.state == CircuitState.CLOSED
+        assert client.circuit_breaker._failure_count == 0
