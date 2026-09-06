@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import time
 
 import httpx
 import pytest
 
 from hakiapi.core.async_base_client import AsyncBaseAPIClient
+from hakiapi.core.circuit_breaker import CircuitBreaker, CircuitOpenError, CircuitState
 from hakiapi.core.exceptions import (
     AuthenticationError,
     ClientError,
@@ -144,7 +146,6 @@ class TestErrorHandling:
         with pytest.raises(ServerError) as exc_info:
             await client.get("/broken")
         assert exc_info.value.status_code == 500
-        # Initial request + retries
         assert calls["count"] == 3
         await client.close()
 
@@ -314,3 +315,104 @@ class TestLifecycle:
         await client.close()
         await client.close()  # Safe to call twice
         assert client._closed is True
+
+
+class TestCircuitBreakerIntegration:
+    def test_client_initializes_with_circuit_breaker(self):
+        client = AsyncBaseAPIClient(base_url="https://api.example.com")
+        assert client.circuit_breaker is not None
+        assert isinstance(client.circuit_breaker, CircuitBreaker)
+
+    def test_client_allows_disabling_circuit_breaker(self):
+        client = AsyncBaseAPIClient(
+            base_url="https://api.example.com", enable_circuit_breaker=False
+        )
+        assert client.circuit_breaker is None
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_records_failure_on_5xx(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(500, content=b"{}")
+
+        client = make_client(handler, max_retries=0)
+        assert client.circuit_breaker is not None
+        assert client.circuit_breaker._failure_count == 0
+
+        with pytest.raises(ServerError):
+            await client.get("/broken")
+
+        assert client.circuit_breaker._failure_count == 1
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_records_failure_on_timeout(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.TimeoutException("timed out", request=request)
+
+        client = make_client(handler, max_retries=0)
+        assert client.circuit_breaker is not None
+        assert client.circuit_breaker._failure_count == 0
+
+        with pytest.raises(RequestTimeoutError):
+            await client.get("/timeout")
+
+        assert client.circuit_breaker._failure_count == 1
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_fast_fails_when_open(self):
+        # We use a handler that returns 200, but we will force the circuit open
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=b"{}")
+
+        client = make_client(handler)
+        assert client.circuit_breaker is not None
+
+        # Force the circuit open and lock the failure time to now
+        client.circuit_breaker._state = CircuitState.OPEN
+        client.circuit_breaker._last_failure_time = time.monotonic()
+
+        with pytest.raises(CircuitOpenError) as exc_info:
+            await client.get("/users")
+
+        assert "Circuit breaker is OPEN" in exc_info.value.message
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_resets_on_success(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return json_response(200, {"ok": True})
+
+        client = make_client(handler)
+        assert client.circuit_breaker is not None
+
+        # Force the circuit into HALF_OPEN with prior failures
+        client.circuit_breaker._state = CircuitState.HALF_OPEN
+        client.circuit_breaker._failure_count = 5
+
+        await client.get("/users")
+
+        # Verify circuit recovered fully
+        assert client.circuit_breaker.state == CircuitState.CLOSED
+        assert client.circuit_breaker._failure_count == 0
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_circuit_breaker_treats_4xx_as_success(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(404, content=b"{}")
+
+        client = make_client(handler, max_retries=0)
+        assert client.circuit_breaker is not None
+
+        # 4xx errors mean the server is ALIVE, so it should reset the circuit
+        client.circuit_breaker._state = CircuitState.HALF_OPEN
+        client.circuit_breaker._failure_count = 5
+
+        with pytest.raises(ClientError):
+            await client.get("/users")
+
+        # Verify circuit recovered fully despite the 404
+        assert client.circuit_breaker.state == CircuitState.CLOSED
+        assert client.circuit_breaker._failure_count == 0
+        await client.close()
