@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import random
+import time
 from typing import Any, TypeVar
 from urllib.parse import urlsplit
 
 import httpx
 from typing_extensions import Self
 
+from .circuit_breaker import CircuitBreaker, CircuitOpenError, CircuitState
 from .exceptions import (
     AuthenticationError,
     ClientError,
@@ -37,12 +39,20 @@ class AsyncBaseAPIClient:
         backoff_factor: float = 0.5,
         max_response_bytes: int = 10 * 1024 * 1024,
         headers: dict[str, str] | None = None,
+        circuit_breaker: CircuitBreaker | None = None,
+        enable_circuit_breaker: bool = True,
     ) -> None:
         self.base_url = self._validate_base_url(base_url)
         self.timeout = timeout
         self.max_retries = max(0, max_retries)
         self.backoff_factor = max(0.0, backoff_factor)
         self.max_response_bytes = max_response_bytes
+
+        # Wire Circuit Breaker
+        self.enable_circuit_breaker = enable_circuit_breaker
+        self.circuit_breaker = (
+            circuit_breaker or CircuitBreaker() if enable_circuit_breaker else None
+        )
 
         default_headers = {"User-Agent": "hakiapi-async-client/1.0"}
         if headers:
@@ -132,6 +142,17 @@ class AsyncBaseAPIClient:
         last_exc: Exception | None = None
 
         while True:
+            # 1. Pre-Flight Circuit Check: Fast-fail if downstream service is down
+            if self.circuit_breaker and self.circuit_breaker.state == CircuitState.OPEN:
+                cooldown_left = self.circuit_breaker.recovery_timeout - (
+                    time.monotonic() - self.circuit_breaker._last_failure_time
+                )
+                raise CircuitOpenError(
+                    message=f"Circuit breaker is OPEN for {self.base_url}. Fast-failing request.",
+                    retry_after=max(0.0, cooldown_left),
+                )
+
+            # 2. Execute Request
             try:
                 response = await self.client.request(
                     method=method,
@@ -140,6 +161,8 @@ class AsyncBaseAPIClient:
                     **kwargs,
                 )
             except httpx.TimeoutException as e:
+                if self.circuit_breaker:
+                    self.circuit_breaker._on_failure()
                 last_exc = RequestTimeoutError(
                     message="Request timed out.",
                     timeout_duration=float(request_timeout)
@@ -152,6 +175,8 @@ class AsyncBaseAPIClient:
                 attempt += 1
                 continue
             except httpx.RequestError as e:
+                if self.circuit_breaker:
+                    self.circuit_breaker._on_failure()
                 last_exc = HakiAPIError(message=str(e))
                 if attempt >= self.max_retries:
                     raise last_exc from e
@@ -159,6 +184,16 @@ class AsyncBaseAPIClient:
                 attempt += 1
                 continue
 
+            # 3. Track Circuit State based on Status Code
+            if response.status_code >= 500:
+                if self.circuit_breaker:
+                    self.circuit_breaker._on_failure()
+            else:
+                # 4xx or 2xx means the server is actively responding
+                if self.circuit_breaker:
+                    self.circuit_breaker._on_success()
+
+            # 4. Retry Logic for specific statuses (429, 50x)
             if response.status_code in _RETRYABLE_STATUS and attempt < self.max_retries:
                 retry_after = self._parse_retry_after(response)
                 await response.aclose()
