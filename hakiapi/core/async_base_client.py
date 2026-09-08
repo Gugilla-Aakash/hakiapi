@@ -20,6 +20,7 @@ from .exceptions import (
     RequestTimeoutError,
     ServerError,
 )
+from .governer import PredictiveGovernor
 
 T = TypeVar("T", bound="AsyncBaseAPIClient")
 
@@ -41,6 +42,8 @@ class AsyncBaseAPIClient:
         headers: dict[str, str] | None = None,
         circuit_breaker: CircuitBreaker | None = None,
         enable_circuit_breaker: bool = True,
+        governor: PredictiveGovernor | None = None,
+        enable_governor: bool = True,
     ) -> None:
         self.base_url = self._validate_base_url(base_url)
         self.timeout = timeout
@@ -53,6 +56,10 @@ class AsyncBaseAPIClient:
         self.circuit_breaker = (
             circuit_breaker or CircuitBreaker() if enable_circuit_breaker else None
         )
+
+        # Wire Predictive Governor
+        self.enable_governor = enable_governor
+        self.governor = governor or PredictiveGovernor() if enable_governor else None
 
         default_headers = {"User-Agent": "hakiapi-async-client/1.0"}
         if headers:
@@ -152,7 +159,13 @@ class AsyncBaseAPIClient:
                     retry_after=max(0.0, cooldown_left),
                 )
 
-            # 2. Execute Request
+            # 2. Pre-Flight Rate-Limit Governor Check: Local async sleep pacing
+            if self.governor:
+                wait_time = self.governor.get_wait_time(self.base_url)
+                if wait_time > 0:
+                    await asyncio.sleep(wait_time)
+
+            # 3. Execute Request
             try:
                 response = await self.client.request(
                     method=method,
@@ -184,7 +197,11 @@ class AsyncBaseAPIClient:
                 attempt += 1
                 continue
 
-            # 3. Track Circuit State based on Status Code
+            # 4. Update Governor with Response Headers
+            if self.governor:
+                self.governor.update_from_headers(self.base_url, dict(response.headers))
+
+            # 5. Track Circuit State based on Status Code
             if response.status_code >= 500:
                 if self.circuit_breaker:
                     self.circuit_breaker._on_failure()
@@ -193,7 +210,7 @@ class AsyncBaseAPIClient:
                 if self.circuit_breaker:
                     self.circuit_breaker._on_success()
 
-            # 4. Retry Logic for specific statuses (429, 50x)
+            # 6. Retry Logic for specific statuses (429, 50x)
             if response.status_code in _RETRYABLE_STATUS and attempt < self.max_retries:
                 retry_after = self._parse_retry_after(response)
                 await response.aclose()
