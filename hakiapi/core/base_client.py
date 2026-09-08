@@ -14,6 +14,7 @@ from .exceptions import (
     RequestTimeoutError,
     ServerError,
 )
+from .governer import PredictiveGovernor
 from .retry import create_retry_adapter
 
 T = TypeVar("T", bound="BaseAPIClient")
@@ -27,6 +28,8 @@ class BaseAPIClient:
         timeout: float = 10.0,
         circuit_breaker: CircuitBreaker | None = None,
         enable_circuit_breaker: bool = True,
+        governor: PredictiveGovernor | None = None,
+        enable_governor: bool = True,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
@@ -36,6 +39,10 @@ class BaseAPIClient:
         self.circuit_breaker = (
             circuit_breaker or CircuitBreaker() if enable_circuit_breaker else None
         )
+
+        # Wire Predictive Governor
+        self.enable_governor = enable_governor
+        self.governor = governor or PredictiveGovernor() if enable_governor else None
 
         self.session = requests.Session()
 
@@ -68,10 +75,16 @@ class BaseAPIClient:
                 retry_after=max(0.0, cooldown_left),
             )
 
+        # 2. Pre-Flight Rate-Limit Governor Check: Local sleep pacing to prevent 429
+        if self.governor:
+            wait_time = self.governor.get_wait_time(self.base_url)
+            if wait_time > 0:
+                time.sleep(wait_time)
+
         full_url = f"{self.base_url}/{endpoint.lstrip('/')}"
         request_timeout = kwargs.pop("timeout", self.timeout)
 
-        # 2. Execute Request with Circuit State Tracking
+        # 3. Execute Request with Circuit State Tracking
         try:
             response = self.session.request(
                 method=method,
@@ -91,7 +104,11 @@ class BaseAPIClient:
                 self.circuit_breaker._on_failure()
             raise HakiAPIError(message=str(e)) from e
 
-        # 3. Handle Server Errors (Trips Circuit)
+        # 4. Update Governor with Response Headers
+        if self.governor:
+            self.governor.update_from_headers(self.base_url, dict(response.headers))
+
+        # 5. Handle Server Errors (Trips Circuit)
         if response.status_code >= 500:
             if self.circuit_breaker:
                 self.circuit_breaker._on_failure()
@@ -101,7 +118,7 @@ class BaseAPIClient:
                 response=response,
             )
 
-        # 4. Success / Client-side Response (Proves Server is Healthy -> Reset Circuit)
+        # 6. Success / Client-side Response (Proves Server is Healthy -> Reset Circuit)
         if self.circuit_breaker:
             self.circuit_breaker._on_success()
 
