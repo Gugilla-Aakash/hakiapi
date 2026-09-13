@@ -5,10 +5,16 @@ from __future__ import annotations
 import asyncio
 import random
 import time
+from types import TracebackType
 from typing import Any, TypeVar
 from urllib.parse import urlsplit
 
-import httpx
+try:
+    import httpx
+except ImportError as _httpx_exc:
+    raise ImportError(
+        "AsyncBaseAPIClient requires the 'async' extra: pip install hakiapi[async]"
+    ) from _httpx_exc
 from typing_extensions import Self
 
 from .circuit_breaker import CircuitBreaker, CircuitOpenError, CircuitState
@@ -111,7 +117,12 @@ class AsyncBaseAPIClient:
     async def __aenter__(self) -> Self:
         return self
 
-    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         await self.close()
 
     def __repr__(self) -> str:  # Keep repr safe
