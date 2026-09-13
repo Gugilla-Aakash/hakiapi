@@ -13,6 +13,7 @@ from requests.adapters import HTTPAdapter
 
 from hakiapi.core import base_client
 from hakiapi.core.base_client import BaseAPIClient
+from hakiapi.core.circuit_breaker import CircuitBreaker, CircuitOpenError, CircuitState
 from hakiapi.core.exceptions import (
     AuthenticationError,
     ClientError,
@@ -21,7 +22,6 @@ from hakiapi.core.exceptions import (
     RequestTimeoutError,
     ServerError,
 )
-from hakiapi.core.circuit_breaker import CircuitBreaker, CircuitOpenError, CircuitState
 
 
 def make_response(
