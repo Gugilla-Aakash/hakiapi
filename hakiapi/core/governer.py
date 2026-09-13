@@ -1,7 +1,6 @@
 import threading
 import time
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
 
 
 @dataclass
@@ -12,7 +11,7 @@ class RateLimitState:
 
 class PredictiveGovernor:
     def __init__(self, safety_margin: int = 1):
-        self._registry: Dict[str, RateLimitState] = {}
+        self._registry: dict[str, RateLimitState] = {}
         self._lock = threading.Lock()
         self.safety_margin = safety_margin
 
@@ -54,7 +53,7 @@ class PredictiveGovernor:
             )
 
     @staticmethod
-    def _parse_github(headers: dict) -> Optional[Tuple[int, float]]:
+    def _parse_github(headers: dict) -> tuple[int, float] | None:
         remaining = headers.get("x-ratelimit-remaining")
         reset = headers.get("x-ratelimit-reset")
         if remaining is None or reset is None:
@@ -65,7 +64,7 @@ class PredictiveGovernor:
             return None
 
     @staticmethod
-    def _parse_ietf(headers: dict) -> Optional[Tuple[int, float]]:
+    def _parse_ietf(headers: dict) -> tuple[int, float] | None:
         """
         Handles the IETF draft `RateLimit` / `RateLimit-Remaining` /
         `RateLimit-Reset` headers, where reset is delta-seconds, not epoch.
