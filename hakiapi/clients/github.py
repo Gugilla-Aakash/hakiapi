@@ -143,7 +143,7 @@ class GitHubClient(BaseAPIClient):
                 **kwargs,
             )
             return response.status_code == 200
-        except Exception:
+        except HakiAPIError:
             return False
 
     def check_top_repos_readmes(
