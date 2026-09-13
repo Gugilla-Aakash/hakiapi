@@ -75,7 +75,7 @@ Requires **Python 3.10+**. Core dependencies are `requests>=2.32.0` and `urllib3
 `AsyncBaseAPIClient` is built on [`httpx`](https://www.python-httpx.org/), which isn't installed by default — add it if you want the async client:
 
 ```bash
-pip install httpx
+pip install hakiapi[async]
 ```
 
 📖 Full API reference and guides: **[hakiapi-docs.hakiapi.workers.dev](https://hakiapi-docs.hakiapi.workers.dev/docs/installation)**
@@ -138,7 +138,7 @@ with GitHubClient() as github:
 
 ```python
 import asyncio
-from hakiapi.core.async_base_client import AsyncBaseAPIClient
+from hakiapi import AsyncBaseAPIClient
 
 async def main():
     async with AsyncBaseAPIClient(base_url="https://api.github.com") as client:
@@ -245,7 +245,7 @@ It implements the classic three-state machine:
 `AsyncBaseAPIClient` is a ground-up, `httpx`-backed rewrite of `BaseAPIClient` for `asyncio` codebases — it is not a thin wrapper around the sync client. It re-implements the same guarantees natively on top of `httpx.AsyncClient` instead of `requests`:
 
 ```python
-from hakiapi.core.async_base_client import AsyncBaseAPIClient
+from hakiapi import AsyncBaseAPIClient
 
 async with AsyncBaseAPIClient(
     base_url="https://api.example.com",
@@ -266,7 +266,7 @@ async with AsyncBaseAPIClient(
 - **Async context manager.** `async with AsyncBaseAPIClient(...) as client:` calls `client.close()` (which awaits `httpx.AsyncClient.aclose()`) on exit; `close()` is idempotent, so calling it more than once is safe.
 - **`get`, `post`, `put`, `delete`, `patch`** all `await` through the same `_request()` pipeline as the sync client, and all accept `raw_response=True` to get the `httpx.Response` back instead of the parsed body.
 
-> **Note:** `AsyncBaseAPIClient` currently lives in `hakiapi.core.async_base_client` as a standalone import — it isn't re-exported from the top-level `hakiapi` package yet, so import it directly as shown above.
+> **Note:** `AsyncBaseAPIClient` is re-exported from the top-level `hakiapi` package (`from hakiapi import AsyncBaseAPIClient`) and from `hakiapi.core`. It requires the `async` extra (`pip install hakiapi[async]`); importing it without `httpx` installed raises an `ImportError` with that hint.
 
 ### Smart Pagination (`core/paginator.py`)
 
@@ -473,6 +473,7 @@ pytest
 * [x] `GitHubClient`, `GmailClient`, `GoogleCalendarClient`
 * [x] Async client (`AsyncBaseAPIClient`, `httpx`-based)
 * [x] Circuit breaker (`CircuitBreaker`) for fail-fast protection against cascading failures
+* [x] Top-level `hakiapi` export for `AsyncBaseAPIClient` (`pip install hakiapi[async]`)
 
 **Planned**
 
@@ -480,7 +481,6 @@ pytest
 * [ ] Twitter/X client
 * [ ] Wire automatic silent refresh into `GoogleOAuthFlow.get_token()`
 * [ ] Async versions of `GitHubClient` / `GmailClient` / `GoogleCalendarClient` on top of `AsyncBaseAPIClient`
-* [ ] Top-level `hakiapi` export for `AsyncBaseAPIClient`
 * [ ] Plugin system
 
 ---
