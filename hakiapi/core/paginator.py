@@ -62,10 +62,9 @@ def paginate(
 
                 raise ValueError(f"Unexpected pagination response: {data}")
         else:
-            raise ValueError("Unexpected response format.")
+            raise ValueError("Unexpected response format.")  # noqa: TRY004 - public API raises ValueError; changing to TypeError would break callers/tests
 
-        for item in items:
-            yield item
+        yield from items
 
         # 1. GitHub-style (Link header)
         if "next" in response.links:
