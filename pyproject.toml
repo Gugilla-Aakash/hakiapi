@@ -36,10 +36,15 @@ classifiers = [
 "Bug Tracker" = "https://github.com/Gugilla-Aakash/hakiapi/issues"
 
 [project.optional-dependencies]
+async = [
+    "httpx>=0.27.0",
+]
 dev = [
     "pytest",
+    "pytest-asyncio",
     "responses",
     "ruff",
+    "httpx>=0.27.0",
 ]
 
 [tool.setuptools.packages.find]
