@@ -47,10 +47,12 @@ class CircuitBreaker:
     @property
     def state(self) -> CircuitState:
         with self._lock:
-            if self._state == CircuitState.OPEN:
+            if (
+                self._state == CircuitState.OPEN
                 # Check if recovery timeout has elapsed to transition to HALF_OPEN
-                if time.monotonic() - self._last_failure_time >= self.recovery_timeout:
-                    self._state = CircuitState.HALF_OPEN
+                and time.monotonic() - self._last_failure_time >= self.recovery_timeout
+            ):
+                self._state = CircuitState.HALF_OPEN
             return self._state
 
     def __call__(self, func: Callable[..., T]) -> Callable[..., T]:
@@ -69,9 +71,9 @@ class CircuitBreaker:
                 result = func(*args, **kwargs)
                 self._on_success()
                 return result
-            except self.expected_exceptions as e:
+            except self.expected_exceptions:
                 self._on_failure()
-                raise e
+                raise
 
         return wrapper
 
@@ -93,6 +95,8 @@ class CircuitBreaker:
             if self._state == CircuitState.HALF_OPEN:
                 # Trial request failed, reopen the circuit immediately
                 self._state = CircuitState.OPEN
-            elif self._state == CircuitState.CLOSED:
-                if self._failure_count >= self.failure_threshold:
-                    self._state = CircuitState.OPEN
+            elif (
+                self._state == CircuitState.CLOSED
+                and self._failure_count >= self.failure_threshold
+            ):
+                self._state = CircuitState.OPEN
