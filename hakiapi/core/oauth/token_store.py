@@ -48,7 +48,9 @@ class OAuthToken:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> OAuthToken:
         if not isinstance(data, dict):
-            raise ValueError("Token data must be a dictionary object.")
+            raise ValueError(  # noqa: TRY004 - public API raises ValueError; TypeError would break callers
+                "Token data must be a dictionary object."
+            )
 
         try:
             access_token = data["access_token"]
@@ -58,7 +60,9 @@ class OAuthToken:
             ) from e
 
         if not isinstance(access_token, str):
-            raise ValueError("Required 'access_token' field must be a string.")
+            raise ValueError(  # noqa: TRY004 - public API raises ValueError; TypeError would break callers
+                "Required 'access_token' field must be a string."
+            )
 
         return cls(
             access_token=access_token,
