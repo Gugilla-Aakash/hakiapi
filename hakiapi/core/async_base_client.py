@@ -26,7 +26,7 @@ from .exceptions import (
     RequestTimeoutError,
     ServerError,
 )
-from .governer import PredictiveGovernor
+from .governor import PredictiveGovernor
 
 T = TypeVar("T", bound="AsyncBaseAPIClient")
 
