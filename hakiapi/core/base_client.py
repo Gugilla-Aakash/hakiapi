@@ -15,7 +15,7 @@ from .exceptions import (
     RequestTimeoutError,
     ServerError,
 )
-from .governer import PredictiveGovernor
+from .governor import PredictiveGovernor
 from .retry import create_retry_adapter
 
 T = TypeVar("T", bound="BaseAPIClient")
