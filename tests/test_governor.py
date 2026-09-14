@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 
-from hakiapi.core.governer import PredictiveGovernor, RateLimitState
+from hakiapi.core.governor import PredictiveGovernor, RateLimitState
 
 
 class TestPredictiveGovernor:
