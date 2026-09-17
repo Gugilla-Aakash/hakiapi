@@ -20,7 +20,7 @@ Authentication · OAuth 2.0 · Retries · **Predictive Rate-Limit Governor** · 
 
 📖 **[Read the full documentation →](https://hakiapi-docs.hakiapi.workers.dev/docs/)**
 
-[Docs](https://hakiapi-docs.hakiapi.workers.dev/docs/) • [Installation](#installation) • [Quick Start](#quick-start) • [Features](#-features) • [Resilience](#resilience-built-in-not-bolted-on) • [Core Concepts](#core-concepts) • [Async Client](#async-client-core-async_base_clientpy) • [Bundled Clients](#bundled-clients) • [Create Your Own Client](#create-your-own-client) • [Architecture](#architecture--project-structure) • [Roadmap](#roadmap)
+[Docs](https://hakiapi-docs.hakiapi.workers.dev/docs/) • [What's New](#whats-new-in-v21x) • [Installation](#installation) • [Quick Start](#quick-start) • [Features](#-features) • [Resilience](#resilience-built-in-not-bolted-on) • [Core Concepts](#core-concepts) • [Async Client](#async-client-coreasync_base_clientpy) • [Bundled Clients](#bundled-clients) • [Create Your Own Client](#create-your-own-client) • [Examples](#examples) • [Architecture](#architecture--project-structure) • [Troubleshooting](#troubleshooting) • [Roadmap](#roadmap)
 
 </div>
 
@@ -28,6 +28,7 @@ Authentication · OAuth 2.0 · Retries · **Predictive Rate-Limit Governor** · 
 
 ## Table of Contents
 
+- [What's New in v2.1.x](#whats-new-in-v21x)
 - [Why HakiAPI?](#why-hakiapi)
 - [✨ Features](#-features)
 - [Installation](#installation)
@@ -36,12 +37,30 @@ Authentication · OAuth 2.0 · Retries · **Predictive Rate-Limit Governor** · 
 - [Core Concepts](#core-concepts)
 - [Bundled Clients](#bundled-clients)
 - [Create Your Own Client](#create-your-own-client)
+- [Examples](#examples)
 - [Architecture & Project Structure](#architecture--project-structure)
 - [Design Principles](#design-principles)
 - [Testing](#testing)
+- [Troubleshooting](#troubleshooting)
 - [Roadmap](#roadmap)
 - [Contributing](#contributing)
 - [License](#license)
+
+---
+
+## What's New in v2.1.x
+
+Current release: **v2.1.5** (`pip install -U hakiapi`).
+
+| New in | Feature | What you get |
+|---|---|---|
+| v2.1.x | 🧭 **Predictive rate-limit governor** (`core/governor.py`) | `PredictiveGovernor` paces requests proactively from `X-RateLimit-*` / `RateLimit-*` headers. Wired into **both** `BaseAPIClient` and `AsyncBaseAPIClient` by default (`enable_governor=False` to opt out; share one instance across clients to coordinate pacing). |
+| v2.1.x | 🧯 **Circuit breaker built into every client** (`core/circuit_breaker.py`) | `CircuitBreaker` (`CLOSED → OPEN → HALF_OPEN`) now runs inside every `_request()` — fails fast with `CircuitOpenError(retry_after=...)` during cooldown, then auto-probes recovery. Still usable standalone as `@breaker`. |
+| v2.1.x | ⚡ **Top-level async export + `async` extra** | `from hakiapi import AsyncBaseAPIClient` (also `from hakiapi.core import AsyncBaseAPIClient`). Install with `pip install hakiapi[async]`; importing without `httpx` raises an `ImportError` with that hint. |
+| v2.1.x | 📊 **GitHub GraphQL engine + profile aggregation** | `execute_graphql()` (raises `HakiAPIError` on body-level `"errors"`), `get_user_contributions()` (365-day calendar + lifetime PR/issue activity), `fetch_full_profile_data()`, `check_readme_exists()` / `check_top_repos_readmes()`. |
+| v2.1.5 | 🔧 **Governor rename (with shim)** | `hakiapi.core.governer` (typo) → `hakiapi.core.governor`. Old path still works via `DeprecationWarning` shim; new code should use `hakiapi.core.governor`. |
+
+> Upgrading from ≤ v2.1.4? Only change needed is the governor import if you referenced the old typo'd path — everything else is backward compatible.
 
 ---
 
@@ -200,6 +219,44 @@ bare = BaseAPIClient(
 )
 ```
 
+### 5. Self-authenticating clients (`OAuth2Auth`) + silent refresh
+
+`OAuth2Auth` wraps any flow object exposing `get_token()` and injects a fresh `Authorization: Bearer` header on **every** request — no manual token plumbing in your endpoint methods:
+
+```python
+from hakiapi import BaseAPIClient
+from hakiapi.core.auth import OAuth2Auth
+
+class MyGoogleClient(BaseAPIClient):
+    def __init__(self, oauth_flow, **kwargs):
+        super().__init__(
+            base_url="https://www.googleapis.com/calendar/v3",
+            auth=OAuth2Auth(oauth_flow),  # calls flow.get_token() per request
+            **kwargs,
+        )
+```
+
+Expired but refreshable? Refresh silently without opening a browser — and if Google reports the grant as revoked, the store is wiped automatically so the next `get_token()` falls back to the interactive flow:
+
+```python
+import os
+
+from hakiapi.core.oauth.refresh import refresh_access_token
+
+stored = oauth_flow.store.get_token()
+if stored is not None and stored.is_expired and stored.refresh_token:
+    token = refresh_access_token(
+        stored,
+        client_id=os.environ["GOOGLE_CLIENT_ID"],
+        client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
+        store=oauth_flow.store,
+    )
+else:
+    token = oauth_flow.get_token()
+```
+
+> `get_token()` itself never refreshes silently — it returns the cached token when valid, otherwise re-runs interactive consent (pass `force=True` to re-run consent unconditionally). Wire `refresh_access_token()` in yourself when you want non-interactive renewal.
+
 ---
 
 ## Resilience: Built In, Not Bolted On
@@ -271,22 +328,23 @@ except ServerError:
 | `ServerError` | Any `5xx` | — |
 | `RequestTimeoutError` | The request times out at the network level (no HTTP response was ever received) | `timeout_duration` |
 | `CircuitOpenError` | Call blocked because the breaker is OPEN (no HTTP request was made) | `retry_after` — seconds left in cooldown, clamped to `>= 0` |
+| `OAuthFlowError` | Interactive consent / code exchange / silent refresh fails (`hakiapi.core.oauth.google`) | Inherits `HakiAPIError` (`message`, `status_code`, `response`) |
 
-One `except` block works for both sync and async clients — they raise from the exact same `hakiapi.core.exceptions` module.
+One `except HakiAPIError` block works for both sync and async clients — they raise from the exact same `hakiapi.core.exceptions` module (`CircuitOpenError` lives in `hakiapi.core.circuit_breaker`, `OAuthFlowError` in `hakiapi.core.oauth.google`, both subclassing `HakiAPIError`).
 
 ### Authentication Strategies (`core/auth.py`)
 
 All strategies implement `requests.auth.AuthBase`, so they drop straight into `BaseAPIClient(auth=...)`:
 
 ```python
-from hakiapi.core.auth import BearerTokenAuth, HeaderApiKeyAuth, QueryApiKeyAuth, HmacAuth
+from hakiapi.core.auth import BearerTokenAuth, HeaderApiKeyAuth, QueryApiKeyAuth, HmacAuth, OAuth2Auth
 ```
 
 - **`BearerTokenAuth(token)`** — sets `Authorization: Bearer <token>`.
 - **`HeaderApiKeyAuth(header_name, api_key)`** — injects the key under a custom header.
 - **`QueryApiKeyAuth(param_name, api_key)`** — appends the key as a query parameter, preserving any existing query string (duplicate keys kept).
-- **`HmacAuth(api_key, secret_key, ...)`** — signs each request with HMAC-SHA256 over `METHOD\nPATH\nTIMESTAMP\nBODY` (newline-delimited to prevent field-collision signature forgery), sending the key, timestamp, and signature as headers. Customizable header names via `api_key_header` / `signature_header` / `timestamp_header`. Raises `TypeError` for streaming bodies, which aren't supported.
-- **`OAuth2Auth(flow)`** — wraps any object exposing `get_token()` (like `GoogleOAuthFlow`) and injects a fresh `Authorization: Bearer` header on every request.
+- **`HmacAuth(api_key, secret_key, ...)`** — signs each request with HMAC-SHA256 over `METHOD\nPATH\nTIMESTAMP\nBODY` (newline-delimited to prevent field-collision signature forgery), sending the key, timestamp, and signature as headers. Customizable header names via `api_key_header` / `signature_header` / `timestamp_header`. Raises `TypeError` for streaming bodies, which aren't supported, and `ValueError` if the request has no HTTP method to sign.
+- **`OAuth2Auth(flow)`** — wraps any object exposing `get_token()` (like `GoogleOAuthFlow`) and injects a fresh `Authorization: Bearer` header on every request. See [Quick Start §5](#quick-start) for a full `BaseAPIClient(auth=OAuth2Auth(flow))` example.
 
 ### Retry Engine (`core/retry.py` + async native retries)
 
@@ -420,24 +478,56 @@ async with AsyncBaseAPIClient(
 
 Any other shape raises `ValueError("Unexpected pagination response: ...")`. Pass `max_pages` to cap how many pages are fetched. GitHub `Link`-header pagination follows the `next` URL's path + query automatically.
 
+Use it directly in your own clients — no subclassing required:
+
+```python
+from hakiapi import BaseAPIClient
+from hakiapi.core.paginator import paginate
+
+with BaseAPIClient(base_url="https://api.github.com") as client:
+    # Works with any paginated endpoint paginate() understands
+    for repo in paginate(client, "users/torvalds/repos", max_pages=3):
+        print(repo["full_name"])
+```
+
 ### OAuth 2.0 (`core/oauth/`)
 
 The OAuth engine is split into three independent pieces:
 
 - **`token_store.py`** — `OAuthToken` (a dataclass with `access_token`, `refresh_token`, `expires_at`, `scopes`, and an `is_expired` property with a 30-second leeway buffer) and the `TokenStore` abstract base class (`get_token` / `save_token` / `delete_token`). `FileTokenStore` is the concrete implementation: it serializes tokens to JSON, writes atomically via a temp file + `os.replace()`, creates parent dirs as needed, rejects empty files (`None`) and invalid JSON (`ValueError`), and sets `0600` permissions on the file.
 - **`google.py`** — `GoogleOAuthFlow` drives the full interactive Authorization Code flow: builds the consent URL (`access_type=offline`, `prompt=consent` to force a refresh token on every run), opens it with `webbrowser.open()`, boots a one-shot `http.server.HTTPServer` on `localhost:<redirect_port>` to catch the redirect, validates the CSRF `state` parameter, and exchanges the authorization code for tokens via a direct POST to Google's token endpoint. Raises `OAuthFlowError` on denial, timeout, port conflicts, a `state` mismatch, or a failed exchange. `get_token(force=False)` returns the cached token when valid; `force=True` re-runs consent unconditionally.
-- **`refresh.py`** — `refresh_access_token(token, client_id, client_secret, store)` is a standalone function that exchanges a saved `refresh_token` for a new `access_token` without opening a browser. If Google rejects the refresh (revoked/invalid grant), it calls `store.delete_token()` so the next `get_token()` call cleanly falls back to the interactive flow.
+- **`refresh.py`** — `refresh_access_token(token, client_id, client_secret, store)` is a standalone function that exchanges a saved `refresh_token` for a new `access_token` without opening a browser. If Google rejects the refresh (revoked/invalid grant), it calls `store.delete_token()` so the next `get_token()` call cleanly falls back to the interactive flow. Requires the stored token to carry a `refresh_token` (raises `ValueError` otherwise); preserves the old refresh token and scopes when Google doesn't return new ones.
+
+```python
+from hakiapi.core.oauth.refresh import refresh_access_token
+
+current = flow.store.get_token()
+if current and current.refresh_token:
+    try:
+        current = refresh_access_token(
+            current,
+            client_id="...",
+            client_secret="...",
+            store=flow.store,  # updated in place on success, wiped on revocation
+        )
+    except Exception:
+        current = flow.get_token()  # fall back to interactive consent
+```
 
 These three pieces are intentionally decoupled — `GoogleOAuthFlow.get_token()` only checks expiry and re-runs the interactive flow if needed; wiring in silent refreshes via `refresh_access_token()` is left to the caller (or to `OAuth2Auth`, once you build that logic into your own `flow` object).
+
+`OAuthFlowError` (raised for denial, timeout, port conflicts, `state` mismatch, or failed exchange/refresh) inherits from `HakiAPIError`, so a single `except HakiAPIError` covers both transport and OAuth failures.
 
 ---
 
 ## Bundled Clients
 
+All clients are importable from the top level — `from hakiapi import GitHubClient, GmailClient, GoogleCalendarClient, BaseAPIClient, AsyncBaseAPIClient` — or from their module paths (`hakiapi.clients.github`, `hakiapi.clients.gmail`, `hakiapi.clients.google_calendar`). `hakiapi.__version__` reports the installed version.
+
 ### `GitHubClient` — REST + GraphQL + profile aggregation
 
 ```python
-from hakiapi.clients.github import GitHubClient
+from hakiapi import GitHubClient
 
 with GitHubClient(token="ghp_...") as gh:  # token is optional for public endpoints
     gh.get_user("torvalds")
@@ -565,6 +655,37 @@ if __name__ == "__main__":
 
 `BaseAPIClient` exposes `get`, `post`, `put`, `patch`, and `delete`, all routed through `_request()`, which handles the retry-mounted session, governor pacing, breaker checks/tracking, timeout errors, status-code-to-exception mapping, and JSON/text response parsing (falling back to `response.text` if the body isn't valid JSON). Pass `raw_response=True` to get the raw `requests.Response` instead — this is what `paginate()` uses internally to read the `Link` header.
 
+#### Per-request options (both sync and async)
+
+Every verb accepts the same passthrough kwargs — they go straight to `requests` / `httpx`:
+
+| Option | Example | Notes |
+|---|---|---|
+| `params` | `client.get("search/users", params={"q": "torvalds"})` | Query string; `paginate()` manages page cursors for you when you use it |
+| `json` / `data` | `client.post("resource", json={...})` | Request body |
+| `headers` | `client.get("resource", headers={"X-Trace": "1"})` | Merged over session defaults per request |
+| `timeout` | `client.get("resource", timeout=5.0)` | Overrides the client's default `timeout` (10s) for that call only; timeouts raise `RequestTimeoutError` carrying `timeout_duration` |
+| `raw_response` | `client.get("resource", raw_response=True)` | Returns the raw `requests.Response` / `httpx.Response` (needed for `Link` headers, streaming, etc.) |
+| `auth` caveat | `BaseAPIClient(..., auth=(user, pw))` | Besides the 5 `AuthBase` strategies, sync `BaseAPIClient` also accepts a `(username, password)` tuple (HTTP Basic via `requests`); the async client passes `auth` through to `httpx` instead |
+
+#### Coordinating clients: shared governor + breaker inspection
+
+```python
+from hakiapi import BaseAPIClient
+from hakiapi.core.circuit_breaker import CircuitState
+from hakiapi.core.governor import PredictiveGovernor
+
+# One governor shared across clients paces them as a group
+# (state is keyed by base_url, so same-host clients coordinate).
+shared_governor = PredictiveGovernor(safety_margin=2)
+a = BaseAPIClient(base_url="https://api.github.com", governor=shared_governor)
+b = BaseAPIClient(base_url="https://api.github.com", governor=shared_governor)
+
+# Inspect breaker health any time (lazy OPEN → HALF_OPEN transition included)
+if a.circuit_breaker and a.circuit_breaker.state == CircuitState.OPEN:
+    print("GitHub downstream is cooling down — expect CircuitOpenError fast-fails.")
+```
+
 Need async? Subclass `AsyncBaseAPIClient` instead — same pattern, `async def` methods, `await self.get(...)`:
 
 ```python
@@ -579,6 +700,24 @@ class AsyncWeatherClient(AsyncBaseAPIClient):
             "forecast",
             params={"latitude": latitude, "longitude": longitude, "current_weather": True},
         )
+```
+
+---
+
+## Examples
+
+Runnable scripts live in [`examples/`](examples/) (plus [`example_oauth.py`](example_oauth.py) at the repo root for the end-to-end Google consent flow):
+
+| Script | Shows |
+|---|---|
+| `examples/example_github.py` | `GitHubClient` REST + search + auto-pagination + language aggregation + `execute_graphql` + contributions (`GITHUB_TOKEN`) |
+| `examples/example_gmail.py` | `GmailClient` profile / labels / `messages.search` + `messages.get` with `max_pages` safety valve (`GMAIL_OAUTH_TOKEN`) |
+| `examples/example_google_calender.py` | `GoogleCalendarClient` calendar list + `events.today()` / `events.upcoming()` / `events.get()` (`GOOGLE_CALENDAR_TOKEN`) |
+| `example_oauth.py` | `GoogleOAuthFlow.get_token()` → `GoogleCalendarClient(token=...)` → `events.upcoming(max_results=5)` (`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`) |
+
+```bash
+export GITHUB_TOKEN="ghp_..."
+python examples/example_github.py
 ```
 
 ---
@@ -644,7 +783,13 @@ pip install hakiapi[dev]
 pytest
 ```
 
-* ✅ **370 tests passing**
+Lint:
+
+```bash
+ruff check hakiapi tests
+```
+
+* ✅ **370 tests passing** (verified on Python 3.14, `pytest` with the `dev` extra)
 * ✅ Core framework covered: `auth` (33), `retry` (25), `circuit_breaker` (19), `governor` (7), `paginator` (22), `base_client` (72), `async_base_client` (35), `exceptions` (21)
 * ✅ `AsyncBaseAPIClient` covered end-to-end via `httpx.MockTransport` — success paths, retry/backoff, `Retry-After` handling, timeouts, SSRF/endpoint validation, response-size limits, governor + breaker integration, and context-manager lifecycle
 * ✅ `CircuitBreaker` covered end-to-end — standalone state transitions (`CLOSED → OPEN → HALF_OPEN`), threshold clamping, `retry_after` calculation, success-resets-counter behavior, unexpected-exception passthrough (with `time.monotonic` mocked), plus integration tests proving both sync and async clients track failures, fast-fail when OPEN, and reset on success
@@ -654,6 +799,24 @@ pytest
 * ✅ `GitHubClient` (37), `GmailClient` (13), `GoogleCalendarClient` (32) covered
 
 > **Note:** async tests require `pytest-asyncio` (included in the `dev` extra). If you run `pytest` with a bare environment and see `async def functions are not natively supported`, install the dev extra first.
+
+---
+
+## Troubleshooting
+
+| Symptom | Cause → Fix |
+|---|---|
+| `ImportError: AsyncBaseAPIClient requires the 'async' extra` | `httpx` isn't installed → `pip install hakiapi[async]` |
+| `async def functions are not natively supported` under `pytest` | Missing `pytest-asyncio` → `pip install hakiapi[dev]` |
+| `OAuthFlowError: Couldn't start the local server on port 8765` | Port already in use → pass a free `redirect_port=` **and** register `http://localhost:<port>/` as an authorized redirect URI in Google Cloud Console |
+| `OAuthFlowError: ... 'state' ... didn't match` | Forged or stale redirect → abort is intentional; re-run `get_token(force=True)` for a fresh `state` |
+| Token keeps expiring mid-session | `get_token()` doesn't auto-refresh → call `refresh_access_token()` when `token.is_expired` (30s leeway) and a `refresh_token` exists |
+| `RateLimitError` despite the governor | Governor only learns from `X-RateLimit-*` / `RateLimit-*` headers; APIs without those headers can't be paced proactively — raise `safety_margin` or catch `RateLimitError.retry_after` and sleep |
+| `CircuitOpenError` on every call | Breaker is in cooldown after `failure_threshold` consecutive 5xx/timeouts → back off for `e.retry_after` seconds; inspect `client.circuit_breaker.state`; disable per-client with `enable_circuit_breaker=False` for local mocks |
+| `ValueError: endpoint must be a relative path` (async) | Absolute/protocol-relative endpoint → pass a relative path (`"users/me"`, not `"https://..."`); sync client joins `base_url + endpoint` without this guard |
+| `ValueError: Unsupported base_url scheme` (async) | `base_url` must be `http(s)` with a host; sync client only strips trailing `/` |
+| `HakiAPIError: Response body ... exceeds max_response_bytes` (async) | Lower the payload or raise `max_response_bytes=` (default 10 MiB); sync client has no size guard |
+| `DeprecationWarning: hakiapi.core.governer is deprecated` | Typo'd import → switch to `from hakiapi.core.governor import PredictiveGovernor` |
 
 ---
 
