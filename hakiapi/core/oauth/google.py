@@ -13,7 +13,7 @@ from ..exceptions import HakiAPIError
 from .token_store import OAuthToken, TokenStore
 
 GOOGLE_AUTH_URI = "https://accounts.google.com/o/oauth2/v2/auth"
-GOOGLE_TOKEN_URI = "https://oauth2.googleapis.com/token"
+GOOGLE_TOKEN_URI = "https://oauth2.googleapis.com/token"  # nosec B105
 
 
 class OAuthFlowError(HakiAPIError):
