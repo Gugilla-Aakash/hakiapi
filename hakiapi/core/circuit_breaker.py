@@ -12,14 +12,20 @@ T = TypeVar("T")
 
 
 class CircuitState(Enum):
-    CLOSED = "CLOSED"         # Normal operation: requests flow through
-    OPEN = "OPEN"             # Failing fast: requests are blocked instantly
-    HALF_OPEN = "HALF_OPEN"   # Testing recovery: a single trial request is allowed
+    CLOSED = "CLOSED"  # Normal operation: requests flow through
+    OPEN = "OPEN"  # Failing fast: requests are blocked instantly
+    HALF_OPEN = "HALF_OPEN"  # Testing recovery: a single trial request is allowed
 
 
 class CircuitOpenError(HakiAPIError):
     """Raised when an API call is blocked because the circuit breaker is OPEN."""
-    def __init__(self, message: str = "Circuit breaker is OPEN. Request blocked.", retry_after: float | None = None, **kwargs: Any) -> None:
+
+    def __init__(
+        self,
+        message: str = "Circuit breaker is OPEN. Request blocked.",
+        retry_after: float | None = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(message=message, **kwargs)
         self.retry_after = retry_after
 
@@ -27,8 +33,10 @@ class CircuitOpenError(HakiAPIError):
 class CircuitBreaker:
     """
     Thread-safe implementation of the Circuit Breaker pattern.
-    Protects downstream services from cascading failures and prevents resource exhaustion.
+
+    Protects downstream services from cascading failures.
     """
+
     def __init__(
         self,
         failure_threshold: int = 5,
@@ -57,13 +65,16 @@ class CircuitBreaker:
 
     def __call__(self, func: Callable[..., T]) -> Callable[..., T]:
         """Decorator support for wrapping synchronous methods/functions."""
+
         def wrapper(*args: Any, **kwargs: Any) -> T:
             current_state = self.state
 
             if current_state == CircuitState.OPEN:
-                remaining_cooldown = self.recovery_timeout - (time.monotonic() - self._last_failure_time)
+                remaining_cooldown = self.recovery_timeout - (
+                    time.monotonic() - self._last_failure_time
+                )
                 raise CircuitOpenError(
-                    message=f"Circuit is OPEN. Fast-failing request for {func.__name__}.",
+                    message=f"Circuit OPEN. Fast-failing {func.__name__}.",
                     retry_after=max(0.0, remaining_cooldown),
                 )
 
