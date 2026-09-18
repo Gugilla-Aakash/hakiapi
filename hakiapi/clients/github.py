@@ -68,7 +68,7 @@ class GitHubClient(BaseAPIClient):
     def get_repo_languages(
         self, owner: str, repo: str, **kwargs: Any
     ) -> dict[str, int]:
-        """Fetch the exact byte breakdown of all languages used in a specific repository."""
+        """Fetch byte breakdown of languages used in a repository."""
         return self.get(f"repos/{owner}/{repo}/languages", **kwargs)
 
     def get_aggregate_user_languages(
@@ -103,7 +103,8 @@ class GitHubClient(BaseAPIClient):
         self, username: str, **kwargs: Any
     ) -> dict[str, Any]:
         """
-        Fetches authored Pull Requests and Issues across GitHub for collaboration signals.
+        Fetch authored PRs and Issues for collaboration signals.
+
         Returns total counts and a short list of recent items for both.
         """
         pr_query = f"author:{username} type:pr"
@@ -131,7 +132,8 @@ class GitHubClient(BaseAPIClient):
 
     def check_readme_exists(self, owner: str, repo_name: str, **kwargs: Any) -> bool:
         """
-        Check if a repository has a README using GitHub's canonical README REST endpoint.
+        Check for README via GitHub's canonical README endpoint.
+
         Returns True if HTTP 200, False if HTTP 404 or error.
         """
         try:
@@ -184,7 +186,7 @@ class GitHubClient(BaseAPIClient):
 
         response_data = self.post("graphql", json=payload, **kwargs)
 
-        # GraphQL notoriously returns 200 OK even if the query fails, putting the error in the body
+        # GraphQL returns 200 OK even on query failure; error is in body.
         if "errors" in response_data:
             error_msgs = [
                 err.get("message", "Unknown GraphQL error")
@@ -202,9 +204,9 @@ class GitHubClient(BaseAPIClient):
         **kwargs: Any,
     ) -> dict[str, Any]:
         """
-        Fetch 365-day contribution calendar (including weekly breakdown)
-        and lifetime PR/issue counts via GraphQL.
-        Note: from_date and to_date must be ISO 8601 strings (e.g. '2023-01-01T00:00:00Z').
+        Fetch 365-day contributions and lifetime PR/issue counts.
+
+        Note: from_date/to_date must be ISO 8601 strings.
         """
         query = """
         query($login: String!, $from: DateTime, $to: DateTime) {
