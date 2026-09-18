@@ -236,7 +236,8 @@ class AsyncBaseAPIClient:
 
     async def _sleep_backoff(self, attempt: int) -> None:
         delay = self.backoff_factor * (2**attempt)
-        delay += random.uniform(0, self.backoff_factor)  # Add a little randomness
+        # Jitter for retry backoff, not cryptographic use.
+        delay += random.uniform(0, self.backoff_factor)  # nosec B311
         await asyncio.sleep(delay)
 
     async def _handle_response(
