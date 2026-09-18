@@ -73,7 +73,8 @@ class GmailMessagesResource:
     ) -> dict[str, Any]:
         """
         Send an email message.
-        Note: The payload dict must contain a 'raw' key with a base64url encoded RFC 2822 string.
+
+        Note: payload must contain 'raw' base64url RFC 2822 string.
         """
         return self._client.post(
             f"users/{user_id}/messages/send", json=payload, **kwargs
