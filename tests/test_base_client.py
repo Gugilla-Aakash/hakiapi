@@ -30,7 +30,7 @@ def make_response(
     text_data: str | None = None,
     headers: dict[str, str] | None = None,
 ) -> requests.Response:
-    """Helper to generate a mock HTTP response, Response catches the request and send custom payload."""
+    """Helper to generate a mock HTTP response with custom payload."""
     response = requests.models.Response()
     response.status_code = status_code
     response.headers.update(headers or {})
@@ -486,7 +486,7 @@ class TestCircuitBreakerIntegration:
 
     def test_circuit_breaker_treats_4xx_as_success(self, client: BaseAPIClient) -> None:
         assert client.circuit_breaker is not None
-        # 4xx errors mean the server is ALIVE and responding, so it should reset the circuit
+        # 4xx means server is ALIVE, so circuit should reset.
         client.circuit_breaker._state = CircuitState.HALF_OPEN
         client.circuit_breaker._failure_count = 5
 
