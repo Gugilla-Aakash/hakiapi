@@ -5,6 +5,8 @@ Tests for `GitHubClient` in hakiapi/clients/github.py.
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from hakiapi.clients.github import GitHubClient
 from hakiapi.core.exceptions import HakiAPIError
 
@@ -437,36 +439,36 @@ def test_execute_graphql_includes_variables() -> None:
 def test_execute_graphql_raises_hakiapi_error_when_errors_present() -> None:
     gh = _build_client()
 
-    with patch.object(
-        gh,
-        "post",
-        return_value={
-            "errors": [
-                {"message": "Bad query"},
-                {"message": "Unauthorized"},
-            ]
-        },
+    with (
+        patch.object(
+            gh,
+            "post",
+            return_value={
+                "errors": [
+                    {"message": "Bad query"},
+                    {"message": "Unauthorized"},
+                ]
+            },
+        ),
+        pytest.raises(
+            HakiAPIError, match="GraphQL Error\\(s\\): Bad query, Unauthorized"
+        ),
     ):
-        try:
-            gh.execute_graphql("query {}")
-            assert False, "Expected HakiAPIError"
-        except HakiAPIError as exc:
-            assert str(exc) == "GraphQL Error(s): Bad query, Unauthorized"
+        gh.execute_graphql("query {}")
 
 
 def test_execute_graphql_uses_default_error_message() -> None:
     gh = _build_client()
 
-    with patch.object(
-        gh,
-        "post",
-        return_value={"errors": [{}]},
+    with (
+        patch.object(
+            gh,
+            "post",
+            return_value={"errors": [{}]},
+        ),
+        pytest.raises(HakiAPIError, match="Unknown GraphQL error"),
     ):
-        try:
-            gh.execute_graphql("query {}")
-            assert False, "Expected HakiAPIError"
-        except HakiAPIError as exc:
-            assert str(exc) == "GraphQL Error(s): Unknown GraphQL error"
+        gh.execute_graphql("query {}")
 
 
 def test_execute_graphql_forwards_kwargs() -> None:
