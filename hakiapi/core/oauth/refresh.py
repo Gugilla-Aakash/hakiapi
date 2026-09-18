@@ -1,6 +1,7 @@
 """
 Handles the OAuth 2.0 token refresh lifecycle.
 """
+
 import time
 from typing import Any
 
@@ -45,7 +46,7 @@ def refresh_access_token(
         ) from e
 
     if not response.ok:
-        # wipe the useless token from the store so the framework forces a fresh login next time.
+        # Wipe revoked token so next attempt forces a fresh login.
         store.delete_token()
         raise OAuthFlowError(
             f"Token refresh failed ({response.status_code}). Token revoked or expired. "
