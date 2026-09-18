@@ -1,3 +1,4 @@
+import contextlib
 import time
 from types import TracebackType
 from typing import Any, TypeVar
@@ -77,7 +78,7 @@ class BaseAPIClient:
                 time.monotonic() - self.circuit_breaker._last_failure_time
             )
             raise CircuitOpenError(
-                message=f"Circuit breaker is OPEN for {self.base_url}. Fast-failing request.",
+                message=f"Circuit breaker is OPEN for {self.base_url}.",
                 retry_after=max(0.0, cooldown_left),
             )
 
@@ -133,10 +134,8 @@ class BaseAPIClient:
             retry_after_str = response.headers.get("Retry-After")
             retry_after = None
             if retry_after_str:
-                try:
+                with contextlib.suppress(ValueError):
                     retry_after = float(retry_after_str)
-                except ValueError:
-                    pass
 
             raise RateLimitError(
                 message="Rate limit exceeded.",
