@@ -22,10 +22,8 @@ class ClientError(HakiAPIError):
     """Raised when the API returns a 4xx status code."""
 
 
-
 class ServerError(HakiAPIError):
     """Raised when the API returns a 5xx status code."""
-
 
 
 class RateLimitError(ClientError):
