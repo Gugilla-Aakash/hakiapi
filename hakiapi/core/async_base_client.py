@@ -166,7 +166,7 @@ class AsyncBaseAPIClient:
                     time.monotonic() - self.circuit_breaker._last_failure_time
                 )
                 raise CircuitOpenError(
-                    message=f"Circuit breaker is OPEN for {self.base_url}. Fast-failing request.",
+                    message=f"Circuit breaker is OPEN for {self.base_url}.",
                     retry_after=max(0.0, cooldown_left),
                 )
 
