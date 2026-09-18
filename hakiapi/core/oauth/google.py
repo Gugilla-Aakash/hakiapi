@@ -24,7 +24,6 @@ class OAuthFlowError(HakiAPIError):
     """
 
 
-
 class _CallbackHandler(BaseHTTPRequestHandler):
     """
     One-shot handler for Google's redirect back to localhost.
@@ -103,13 +102,14 @@ class GoogleOAuthFlow:
 
     def build_auth_url(self, state: str) -> str:
         """Construct the Google consent-screen URL for this flow."""
+        # offline => refresh_token; consent => re-issue refresh_token
         params = {
             "client_id": self.client_id,
             "redirect_uri": self.redirect_uri,
             "response_type": "code",
             "scope": " ".join(self.scopes),
-            "access_type": "offline",  # request a refresh_token, not just an access_token
-            "prompt": "consent",  # without this, repeat runs may not re-issue a refresh_token
+            "access_type": "offline",
+            "prompt": "consent",
             "state": state,
         }
         return f"{self.auth_uri}?{urlencode(params)}"
@@ -210,7 +210,8 @@ class GoogleOAuthFlow:
         server.oauth_result = None  # type: ignore[attr-defined]
 
         try:
-            server.handle_request()  # blocks for one request, or up to `timeout` seconds
+            # Block for one request, or up to `timeout` seconds.
+            server.handle_request()
         finally:
             server.server_close()
 
