@@ -11,15 +11,16 @@ from requests.auth import AuthBase
 
 class OAuth2Auth(AuthBase):
     """
-    Dynamically injects an OAuth 2.0 Access Token into the Authorization header.
-    It automatically triggers a refresh or interactive login if the token is missing or expired.
+    Inject an OAuth 2.0 token into the Authorization header.
+
+    Triggers a refresh or interactive login if token is missing.
     """
 
     def __init__(self, flow: Any) -> None:
         self.flow = flow
 
     def __call__(self, r: requests.PreparedRequest) -> requests.PreparedRequest:
-        # get_token() does all the heavy lifting: loading, refreshing, or prompting login
+        # get_token(): load, refresh, or prompt login as needed.
         token = self.flow.get_token()
         r.headers["Authorization"] = f"Bearer {token.access_token}"
         return r
