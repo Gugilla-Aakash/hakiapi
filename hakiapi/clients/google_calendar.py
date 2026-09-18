@@ -54,7 +54,7 @@ class CalendarEventsResource:
     def today(
         self, calendar_id: str = "primary", **kwargs: Any
     ) -> Iterator[dict[str, Any]]:
-        """Fetch all events happening between midnight today and midnight tomorrow (UTC)."""
+        """Fetch events from midnight today to midnight tomorrow (UTC)."""
         now = datetime.datetime.now(datetime.timezone.utc)
         start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
         end_of_day = start_of_day + datetime.timedelta(days=1)
