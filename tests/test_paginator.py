@@ -36,7 +36,7 @@ def call_kwargs(mock_client: MagicMock, call_index: int) -> dict[str, Any]:
 
 
 def call_params_dict(mock_client: MagicMock, call_index: int) -> dict[str, Any]:
-    """params are passed as a list of tuples (or None); normalize to a dict for easy asserts."""
+    """Normalize list-of-tuples params to dict for easy asserts."""
     params = call_kwargs(mock_client, call_index)["params"]
     return dict(params) if params else {}
 
@@ -283,7 +283,7 @@ class TestResponseShapeHandling:
     def test_empty_page_but_token_present_continues(
         self, mock_client: MagicMock
     ) -> None:
-        """An empty page shouldn't stop pagination if the API still hands back a token."""
+        """Empty page with token should continue pagination."""
         mock_client._request.side_effect = [
             FakeResponse({"messages": [], "nextPageToken": "A"}),
             FakeResponse({"messages": [{"id": "1"}]}),
