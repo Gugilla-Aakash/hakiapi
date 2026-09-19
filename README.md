@@ -9,6 +9,9 @@ Authentication · OAuth 2.0 · Retries · **Predictive Rate-Limit Governor** · 
 [![PyPI](https://img.shields.io/pypi/v/hakiapi?style=for-the-badge)](https://pypi.org/project/hakiapi/)
 [![Python](https://img.shields.io/pypi/pyversions/hakiapi?style=for-the-badge)](https://pypi.org/project/hakiapi/)
 [![License](https://img.shields.io/github/license/Gugilla-Aakash/hakiapi?style=for-the-badge)](LICENSE)
+[![CI](https://github.com/Gugilla-Aakash/hakiapi/actions/workflows/ci.yml/badge.svg)](https://github.com/Gugilla-Aakash/hakiapi/actions/workflows/ci.yml)
+[![Ruff](https://img.shields.io/badge/lint-ruff-blue?style=for-the-badge)](https://docs.astral.sh/ruff/)
+[![Coverage](https://img.shields.io/badge/coverage-85%25+-success?style=for-the-badge)](#testing)
 [![Tests](https://img.shields.io/badge/tests-370_passing-success?style=for-the-badge)](#testing)
 [![Typing](https://img.shields.io/badge/typing-fully_typed-blue?style=for-the-badge)](#features)
 [![Async](https://img.shields.io/badge/async-httpx_powered-9cf?style=for-the-badge)](#async-client-core-async_base_clientpy)
@@ -59,6 +62,7 @@ Current release: **v2.1.5** (`pip install -U hakiapi`).
 | v2.1.x | ⚡ **Top-level async export + `async` extra** | `from hakiapi import AsyncBaseAPIClient` (also `from hakiapi.core import AsyncBaseAPIClient`). Install with `pip install hakiapi[async]`; importing without `httpx` raises an `ImportError` with that hint. |
 | v2.1.x | 📊 **GitHub GraphQL engine + profile aggregation** | `execute_graphql()` (raises `HakiAPIError` on body-level `"errors"`), `get_user_contributions()` (365-day calendar + lifetime PR/issue activity), `fetch_full_profile_data()`, `check_readme_exists()` / `check_top_repos_readmes()`. |
 | v2.1.5 | 🔧 **Governor rename (with shim)** | `hakiapi.core.governer` (typo) → `hakiapi.core.governor`. Old path still works via `DeprecationWarning` shim; new code should use `hakiapi.core.governor`. |
+| Unreleased | 🛡️ **Quality pipeline (`ci.yml`)** | Moderate Ruff (`E,F,I,UP,B,SIM`, 88, py310) + `ruff format`, pytest matrix `3.10–3.14`, coverage gate `≥85%` (370 passed, 86.94%), `mypy`, `bandit` + `pip-audit`. Local auto-fix via `ruff check --fix` + `ruff format`; CI enforces with `--check` fail. |
 
 > Upgrading from ≤ v2.1.4? Only change needed is the governor import if you referenced the old typo'd path — everything else is backward compatible.
 
@@ -118,11 +122,13 @@ Requires **Python 3.10+**. Core dependencies are `requests>=2.32.0` and `urllib3
 pip install hakiapi[async]
 ```
 
-For development (tests, linting):
+For development (tests, lint, types, security):
 
 ```bash
-pip install hakiapi[dev]
+pip install -e ".[dev,async]"
 ```
+
+`dev` includes `pytest`, `pytest-asyncio`, `pytest-cov`, `ruff`, `mypy`, `bandit[toml]`, `pip-audit`, `httpx`.
 
 📖 Full API reference and guides: **[hakiapi-docs.hakiapi.workers.dev](https://hakiapi-docs.hakiapi.workers.dev/docs/installation)**
 
@@ -779,17 +785,19 @@ flowchart TB
 ## Testing
 
 ```bash
-pip install hakiapi[dev]
-pytest
-```
-
-Lint:
-
-```bash
+pip install -e ".[dev,async]"
 ruff check hakiapi tests
+ruff format --check hakiapi tests
+pytest
+mypy hakiapi
+bandit -r hakiapi -q
+pip-audit
 ```
 
-* ✅ **370 tests passing** (verified on Python 3.14, `pytest` with the `dev` extra)
+* ✅ **370 tests passing, 86.94% coverage (gate ≥85%)** — verified locally on Python 3.14; CI runs matrix `3.10–3.14` via `.github/workflows/ci.yml`
+* ✅ Lint: moderate Ruff (`E,F,I,UP,B,SIM`, line-length 88, py310) + `ruff format`; auto-fix locally with `ruff check --fix` + `ruff format`, CI enforces `--check` fail
+* ✅ Types: `mypy hakiapi` clean (`asyncio_mode=strict` for tests)
+* ✅ Security: `bandit` clean (2 `nosec` false positives: `B311` retry jitter in `async_base_client.py`, `B105` public OAuth URL in `oauth/google.py`); `pip-audit` in CI
 * ✅ Core framework covered: `auth` (33), `retry` (25), `circuit_breaker` (19), `governor` (7), `paginator` (22), `base_client` (72), `async_base_client` (35), `exceptions` (21)
 * ✅ `AsyncBaseAPIClient` covered end-to-end via `httpx.MockTransport` — success paths, retry/backoff, `Retry-After` handling, timeouts, SSRF/endpoint validation, response-size limits, governor + breaker integration, and context-manager lifecycle
 * ✅ `CircuitBreaker` covered end-to-end — standalone state transitions (`CLOSED → OPEN → HALF_OPEN`), threshold clamping, `retry_after` calculation, success-resets-counter behavior, unexpected-exception passthrough (with `time.monotonic` mocked), plus integration tests proving both sync and async clients track failures, fast-fail when OPEN, and reset on success
@@ -837,6 +845,7 @@ ruff check hakiapi tests
 * [x] Circuit breaker (`CircuitBreaker`) — standalone decorator **and** built into both clients by default
 * [x] Predictive rate-limit governor (`PredictiveGovernor`, `core/governor.py`) wired into both clients by default
 * [x] Top-level `hakiapi` export for `AsyncBaseAPIClient` (`pip install hakiapi[async]`)
+* [x] CI quality gates (Ruff, format, pytest+coverage, mypy, bandit/pip-audit, py3.10–3.14 matrix)
 
 **Planned**
 
@@ -852,6 +861,11 @@ ruff check hakiapi tests
 ## Contributing
 
 Contributions are welcome — bug fixes, documentation, tests, or new clients. Please open an issue before proposing major changes so we can discuss the approach first.
+
+1. Fork and create a feature branch.
+2. Auto-fix style: `ruff check --fix hakiapi tests && ruff format hakiapi tests`.
+3. Verify: `pytest` (coverage gate ≥85%), `mypy hakiapi`, `bandit -r hakiapi -q`.
+4. Open a PR — CI (`lint`, pytest matrix `3.10–3.14`, `mypy`, `security`) must stay green.
 
 ---
 
