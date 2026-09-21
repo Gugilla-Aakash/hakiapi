@@ -53,7 +53,7 @@ Authentication · OAuth 2.0 · Retries · **Predictive Rate-Limit Governor** · 
 
 ## What's New in v2.1.x
 
-Current release: **v2.1.5** (`pip install -U hakiapi`).
+Current release: **v2.1.6** (`pip install -U hakiapi`).
 
 | New in | Feature | What you get |
 |---|---|---|
@@ -62,7 +62,7 @@ Current release: **v2.1.5** (`pip install -U hakiapi`).
 | v2.1.x | ⚡ **Top-level async export + `async` extra** | `from hakiapi import AsyncBaseAPIClient` (also `from hakiapi.core import AsyncBaseAPIClient`). Install with `pip install hakiapi[async]`; importing without `httpx` raises an `ImportError` with that hint. |
 | v2.1.x | 📊 **GitHub GraphQL engine + profile aggregation** | `execute_graphql()` (raises `HakiAPIError` on body-level `"errors"`), `get_user_contributions()` (365-day calendar + lifetime PR/issue activity), `fetch_full_profile_data()`, `check_readme_exists()` / `check_top_repos_readmes()`. |
 | v2.1.5 | 🔧 **Governor rename (with shim)** | `hakiapi.core.governer` (typo) → `hakiapi.core.governor`. Old path still works via `DeprecationWarning` shim; new code should use `hakiapi.core.governor`. |
-| Unreleased | 🛡️ **Quality pipeline (`ci.yml`)** | Moderate Ruff (`E,F,I,UP,B,SIM`, 88, py310) + `ruff format`, pytest matrix `3.10–3.14`, coverage gate `≥85%` (370 passed, 86.94%), `mypy`, `bandit` + `pip-audit`. Local auto-fix via `ruff check --fix` + `ruff format`; CI enforces with `--check` fail. |
+| v2.1.6 | 🛡️ **Quality pipeline (`ci.yml`)** | Moderate Ruff (`E,F,I,UP,B,SIM`, 88, py310) + `ruff format`, pytest matrix `3.10–3.14`, coverage gate `≥85%` (370 passed, 86.94%), `mypy`, `bandit` + `pip-audit`. Local auto-fix via `ruff check --fix` + `ruff format`; CI enforces with `--check` fail. |
 
 > Upgrading from ≤ v2.1.4? Only change needed is the governor import if you referenced the old typo'd path — everything else is backward compatible.
 
