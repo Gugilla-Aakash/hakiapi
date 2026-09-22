@@ -6,7 +6,11 @@ import pytest
 import requests
 
 # Adjust this import path if your oauth folder is not inside 'core'
-from hakiapi.core.oauth.google import GoogleOAuthFlow, OAuthFlowError
+from hakiapi.core.oauth.google import (
+    GoogleOAuthFlow,
+    OAuthFlowError,
+    _CallbackHandler,
+)
 from hakiapi.core.oauth.token_store import OAuthToken
 
 
@@ -267,3 +271,91 @@ class TestGoogleOAuthFlowGetToken:
 
         assert result.access_token == "forced-new"
         mock_authorize.assert_called_once()
+
+
+# The One-Shot Redirect Handler
+
+
+def _make_callback_handler(path: str) -> MagicMock:
+    handler = _CallbackHandler.__new__(_CallbackHandler)
+    handler.path = path
+    handler.server = MagicMock()
+    handler.wfile = MagicMock()
+    handler.send_response = MagicMock()
+    handler.send_header = MagicMock()
+    handler.end_headers = MagicMock()
+    return handler  # type: ignore[return-value]
+
+
+class TestCallbackHandler:
+    def test_do_get_captures_code_and_state(self) -> None:
+        handler = _make_callback_handler("/?code=abc123&state=xyz")
+
+        handler.do_GET()
+
+        assert handler.server.oauth_result == {
+            "code": "abc123",
+            "state": "xyz",
+            "error": None,
+        }
+        written = handler.wfile.write.call_args.args[0]
+        assert b"Authorization complete" in written
+
+    def test_do_get_reports_error_body(self) -> None:
+        handler = _make_callback_handler("/?error=access_denied&state=xyz")
+
+        handler.do_GET()
+
+        assert handler.server.oauth_result["error"] == "access_denied"
+        written = handler.wfile.write.call_args.args[0]
+        assert b"Authorization failed" in written
+
+    def test_log_message_is_silent(self) -> None:
+        handler = _make_callback_handler("/?code=abc&state=xyz")
+
+        assert handler.log_message('GET /?code=abc "HTTP/1.1" 200 -') is None
+
+
+class TestCaptureRedirect:
+    def test_capture_redirect_raises_when_port_busy(
+        self, flow: GoogleOAuthFlow, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise(*args: object, **kwargs: object) -> MagicMock:
+            raise OSError("address in use")
+
+        monkeypatch.setattr("hakiapi.core.oauth.google.HTTPServer", _raise)
+
+        with pytest.raises(OAuthFlowError, match="already using it"):
+            flow._capture_redirect(timeout=5.0)
+
+    def test_capture_redirect_raises_on_timeout(
+        self, flow: GoogleOAuthFlow, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        server = MagicMock()
+        server.oauth_result = None
+        monkeypatch.setattr(
+            "hakiapi.core.oauth.google.HTTPServer", lambda *a, **k: server
+        )
+
+        with pytest.raises(OAuthFlowError, match="Timed out"):
+            flow._capture_redirect(timeout=5.0)
+
+        server.server_close.assert_called_once()
+
+    @patch("hakiapi.core.oauth.google.webbrowser.open")
+    def test_authorize_raises_when_no_code(
+        self,
+        mock_webbrowser: MagicMock,
+        flow: GoogleOAuthFlow,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        mock_capture = MagicMock(
+            return_value={"code": None, "state": "mock-state", "error": None}
+        )
+        monkeypatch.setattr(flow, "_capture_redirect", mock_capture)
+        monkeypatch.setattr(
+            "hakiapi.core.oauth.google.secrets.token_urlsafe", lambda _: "mock-state"
+        )
+
+        with pytest.raises(OAuthFlowError, match="authorization code"):
+            flow.authorize()
