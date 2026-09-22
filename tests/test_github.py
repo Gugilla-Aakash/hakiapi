@@ -591,3 +591,85 @@ def test_get_user_contributions_only_includes_from_date() -> None:
         "login": "octocat",
         "from": "2024-01-01T00:00:00Z",
     }
+
+
+# README Existence Check
+
+
+def test_check_readme_exists_returns_true_on_200() -> None:
+    gh = _build_client()
+
+    with patch.object(
+        gh, "_request", return_value=MagicMock(status_code=200)
+    ) as mock_req:
+        assert gh.check_readme_exists("octocat", "hello-world") is True
+
+    _, kwargs = mock_req.call_args
+    assert mock_req.call_args.args == ("HEAD", "repos/octocat/hello-world/readme")
+    assert kwargs["raw_response"] is True
+    assert kwargs["timeout"] == 5.0
+
+
+def test_check_readme_exists_returns_false_on_404() -> None:
+    gh = _build_client()
+
+    with patch.object(gh, "_request", return_value=MagicMock(status_code=404)):
+        assert gh.check_readme_exists("octocat", "missing") is False
+
+
+def test_check_readme_exists_returns_false_on_error() -> None:
+    gh = _build_client()
+
+    with patch.object(gh, "_request", side_effect=HakiAPIError(message="boom")):
+        assert gh.check_readme_exists("octocat", "hello-world") is False
+
+
+def test_check_top_repos_readmes_filters_forks_and_sorts() -> None:
+    gh = _build_client()
+    repos = [
+        {"name": "low", "fork": False, "stargazers_count": 5},
+        {"name": "high", "fork": False, "stargazers_count": 50},
+        {"name": "forked", "fork": True, "stargazers_count": 100},
+        {"fork": False, "stargazers_count": 10},
+    ]
+
+    with patch.object(gh, "check_readme_exists", return_value=True) as mock_check:
+        results = gh.check_top_repos_readmes("octocat", repos, top_n=3)
+
+    assert results == {"high": True, "low": True}
+    checked = [c.args[1] for c in mock_check.call_args_list]
+    assert checked == ["high", "low"]
+
+
+def test_fetch_full_profile_data_aggregates() -> None:
+    gh = _build_client()
+    contrib = {
+        "recent_contributions_365_days": {"total_contributions": 10},
+        "lifetime_activity": {"pull_requests": {"total_count": 3}},
+    }
+    repos = [
+        {"name": "a", "language": "Python"},
+        {"name": "b", "language": "Python"},
+        {"name": "c", "language": None},
+    ]
+
+    with (
+        patch.object(gh, "get_user_contributions", return_value=contrib),
+        patch.object(gh, "get_user_repos", return_value=repos) as mock_repos,
+        patch.object(
+            gh,
+            "check_top_repos_readmes",
+            return_value={"a": True, "b": False},
+        ),
+    ):
+        data = gh.fetch_full_profile_data("octocat")
+
+    assert data["username"] == "octocat"
+    assert data["repositories"]["language_breakdown"] == {"Python": 2}
+    assert data["readme_statuses"] == {"a": True, "b": False}
+    by_name = {r["name"]: r for r in data["repositories"]["items"]}
+    assert by_name["a"]["has_readme"] is True
+    assert by_name["b"]["has_readme"] is False
+    assert by_name["c"]["has_readme"] is None
+    _, kwargs = mock_repos.call_args
+    assert kwargs["params"] == {"per_page": 100, "sort": "updated"}
