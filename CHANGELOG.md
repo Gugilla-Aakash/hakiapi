@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Coverage hardening for README/profile checks, OAuth redirect handler,
   and the `governer` deprecation shim.
 
+### Changed
+- Test suite now at 382 passing / 93.25% coverage; README stats synced.
+
 ## [2.1.6] - 2026-09-21
 
 ### Added
