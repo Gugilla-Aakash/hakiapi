@@ -12,7 +12,7 @@ Authentication · OAuth 2.0 · Retries · **Predictive Rate-Limit Governor** · 
 [![CI](https://github.com/Gugilla-Aakash/hakiapi/actions/workflows/ci.yml/badge.svg)](https://github.com/Gugilla-Aakash/hakiapi/actions/workflows/ci.yml)
 [![Ruff](https://img.shields.io/badge/lint-ruff-blue?style=for-the-badge)](https://docs.astral.sh/ruff/)
 [![Coverage](https://img.shields.io/badge/coverage-85%25+-success?style=for-the-badge)](#testing)
-[![Tests](https://img.shields.io/badge/tests-370_passing-success?style=for-the-badge)](#testing)
+[![Tests](https://img.shields.io/badge/tests-382_passing-success?style=for-the-badge)](#testing)
 [![Typing](https://img.shields.io/badge/typing-fully_typed-blue?style=for-the-badge)](#features)
 [![Async](https://img.shields.io/badge/async-httpx_powered-9cf?style=for-the-badge)](#async-client-core-async_base_clientpy)
 [![Resilience](https://img.shields.io/badge/resilience-circuit_breaker_%2B_governor-orange?style=for-the-badge)](#resilience-built-in-not-bolted-on)
@@ -62,7 +62,7 @@ Current release: **v2.1.6** (`pip install -U hakiapi`).
 | v2.1.x | ⚡ **Top-level async export + `async` extra** | `from hakiapi import AsyncBaseAPIClient` (also `from hakiapi.core import AsyncBaseAPIClient`). Install with `pip install hakiapi[async]`; importing without `httpx` raises an `ImportError` with that hint. |
 | v2.1.x | 📊 **GitHub GraphQL engine + profile aggregation** | `execute_graphql()` (raises `HakiAPIError` on body-level `"errors"`), `get_user_contributions()` (365-day calendar + lifetime PR/issue activity), `fetch_full_profile_data()`, `check_readme_exists()` / `check_top_repos_readmes()`. |
 | v2.1.5 | 🔧 **Governor rename (with shim)** | `hakiapi.core.governer` (typo) → `hakiapi.core.governor`. Old path still works via `DeprecationWarning` shim; new code should use `hakiapi.core.governor`. |
-| v2.1.6 | 🛡️ **Quality pipeline (`ci.yml`)** | Moderate Ruff (`E,F,I,UP,B,SIM`, 88, py310) + `ruff format`, pytest matrix `3.10–3.14`, coverage gate `≥85%` (370 passed, 86.94%), `mypy`, `bandit` + `pip-audit`. Local auto-fix via `ruff check --fix` + `ruff format`; CI enforces with `--check` fail. |
+| v2.1.6 | 🛡️ **Quality pipeline (`ci.yml`)** | Moderate Ruff (`E,F,I,UP,B,SIM`, 88, py310) + `ruff format`, pytest matrix `3.10–3.14`, coverage gate `≥85%` (382 passed, 93.25%), `mypy`, `bandit` + `pip-audit`. Local auto-fix via `ruff check --fix` + `ruff format`; CI enforces with `--check` fail. |
 
 > Upgrading from ≤ v2.1.4? Only change needed is the governor import if you referenced the old typo'd path — everything else is backward compatible.
 
@@ -794,17 +794,17 @@ bandit -r hakiapi -q
 pip-audit
 ```
 
-* ✅ **370 tests passing, 86.94% coverage (gate ≥85%)** — verified locally on Python 3.14; CI runs matrix `3.10–3.14` via `.github/workflows/ci.yml`
+* ✅ **382 tests passing, 93.25% coverage (gate ≥85%)** — verified locally on Python 3.14; CI runs matrix `3.10–3.14` via `.github/workflows/ci.yml`
 * ✅ Lint: moderate Ruff (`E,F,I,UP,B,SIM`, line-length 88, py310) + `ruff format`; auto-fix locally with `ruff check --fix` + `ruff format`, CI enforces `--check` fail
 * ✅ Types: `mypy hakiapi` clean (`asyncio_mode=strict` for tests)
 * ✅ Security: `bandit` clean (2 `nosec` false positives: `B311` retry jitter in `async_base_client.py`, `B105` public OAuth URL in `oauth/google.py`); `pip-audit` in CI
 * ✅ Core framework covered: `auth` (33), `retry` (25), `circuit_breaker` (19), `governor` (7), `paginator` (22), `base_client` (72), `async_base_client` (35), `exceptions` (21)
 * ✅ `AsyncBaseAPIClient` covered end-to-end via `httpx.MockTransport` — success paths, retry/backoff, `Retry-After` handling, timeouts, SSRF/endpoint validation, response-size limits, governor + breaker integration, and context-manager lifecycle
 * ✅ `CircuitBreaker` covered end-to-end — standalone state transitions (`CLOSED → OPEN → HALF_OPEN`), threshold clamping, `retry_after` calculation, success-resets-counter behavior, unexpected-exception passthrough (with `time.monotonic` mocked), plus integration tests proving both sync and async clients track failures, fast-fail when OPEN, and reset on success
-* ✅ `PredictiveGovernor` covered — no-state passthrough, safety-margin gating, wait-time math, stale-reset recovery, GitHub + IETF header parsing (case-insensitive), and unknown-header tolerance
-* ✅ Full OAuth 2.0 engine covered: `google.py` interactive flow (12), `refresh.py` silent refresh (5), fully mocked
+* ✅ `PredictiveGovernor` covered — no-state passthrough, safety-margin gating, wait-time math, stale-reset recovery, GitHub + IETF header parsing (case-insensitive), unknown-header tolerance, plus `governer` shim deprecation test (1)
+* ✅ Full OAuth 2.0 engine covered: `google.py` interactive flow (18), `refresh.py` silent refresh (5), fully mocked
 * ✅ `FileTokenStore` atomic-write behavior covered (37)
-* ✅ `GitHubClient` (37), `GmailClient` (13), `GoogleCalendarClient` (32) covered
+* ✅ `GitHubClient` (42), `GmailClient` (13), `GoogleCalendarClient` (32) covered
 
 > **Note:** async tests require `pytest-asyncio` (included in the `dev` extra). If you run `pytest` with a bare environment and see `async def functions are not natively supported`, install the dev extra first.
 
